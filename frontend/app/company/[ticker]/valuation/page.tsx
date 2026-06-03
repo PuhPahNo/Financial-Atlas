@@ -38,17 +38,30 @@ export default function ValuationPage() {
   const [form, setForm] = useState<Record<string, number>>({});
   const baseRef = useRef<Record<string, number>>({});
   const [recomputing, setRecomputing] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
 
   useEffect(() => {
     setLoading(true);
     api.valuation(ticker)
-      .then((res) => { setData(res.data); setForm(res.data.assumptions); baseRef.current = res.data.assumptions; setError(null); })
+      .then((res) => {
+        setData(res.data);
+        setForm(res.data.assumptions);
+        baseRef.current = res.data.assumptions;
+        setError(null);
+        return api.valuationHistory(ticker).then((hist) => setHistory(hist.data.results ?? []));
+      })
       .catch((e) => setError(e.message)).finally(() => setLoading(false));
   }, [ticker]);
 
   async function recompute(assumptions: Record<string, number>) {
     setRecomputing(true);
-    try { const res = await api.valuationCustom(ticker, { assumptions }); setData(res.data); setForm(assumptions); }
+    try {
+      const res = await api.valuationCustom(ticker, { assumptions });
+      setData(res.data);
+      setForm(assumptions);
+      const hist = await api.valuationHistory(ticker);
+      setHistory(hist.data.results ?? []);
+    }
     catch (e: any) { setError(e.message); } finally { setRecomputing(false); }
   }
 
@@ -123,6 +136,8 @@ export default function ValuationPage() {
             <FairValueRange bear={data.scenarios.bear} bull={data.scenarios.bull} blended={data.blended_fair_value} price={data.current_price} />
           </Panel>
 
+          {data.diagnostics && <ValuationDiagnostics diagnostics={data.diagnostics} />}
+
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <Panel title="Per-model fair value" hint="base case · hover a model for its formula, inputs & sensitivity">
@@ -151,6 +166,7 @@ export default function ValuationPage() {
                         <div className="font-mono text-sm">
                           {m.applicable ? price(m.fair_value_per_share) : <span className="text-muted">N/M</span>}
                           {data.applied_weights[m.model] != null && <span className="ml-2 text-xs text-faint">{pct(data.applied_weights[m.model], 0)}</span>}
+                          {!m.applicable && m.reason && <span className="ml-2 text-xs text-faint">{m.reason}</span>}
                         </div>
                       </div>
                     );
@@ -182,7 +198,9 @@ export default function ValuationPage() {
             </Panel>
           </div>
 
-          <SensitivityGrid ticker={ticker} base={baseRef.current} currentPrice={data.current_price} />
+          <SensitivityDiagnostics sensitivity={data.diagnostics?.sensitivity} currentPrice={data.current_price} />
+
+          <ValuationHistory rows={history} />
 
           <p className="text-xs text-faint">Fair values are model outputs based on the assumptions shown — not financial advice. Use presets and the sensitivity grid to stress-test the thesis.</p>
           </>
@@ -193,56 +211,128 @@ export default function ValuationPage() {
   );
 }
 
-function SensitivityGrid({ ticker, base, currentPrice }: { ticker: string; base: Record<string, number>; currentPrice?: number | null }) {
-  const [grid, setGrid] = useState<(number | null)[][] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const g0 = base.growth_1_5 ?? 0.05;
-  const d0 = base.discount_rate ?? 0.1;
-  const growths = [g0 * 0.5, g0, g0 * 1.5];
-  const discounts = [d0 + 0.02, d0, d0 - 0.02];
-
-  async function run() {
-    setBusy(true);
-    try {
-      const rows: (number | null)[][] = [];
-      for (const dr of discounts) {
-        const row: (number | null)[] = [];
-        for (const g of growths) {
-          const res = await api.valuationCustom(ticker, { assumptions: { ...base, discount_rate: dr, growth_1_5: g, growth_6_10: g / 2, eps_growth: g } });
-          row.push(res.data.blended_fair_value ?? null);
-        }
-        rows.push(row);
-      }
-      setGrid(rows);
-    } finally { setBusy(false); }
-  }
-
+function ValuationDiagnostics({ diagnostics }: { diagnostics: any }) {
+  const blend = diagnostics.blend ?? {};
+  const models = diagnostics.models ?? [];
   return (
-    <Panel title="Sensitivity" hint="blended fair value as discount rate × growth change — green = above today's price"
-      right={!grid && <button onClick={run} disabled={busy} className="rounded-md border border-line px-3 py-1.5 text-xs hover:border-accent disabled:opacity-50">{busy ? "Computing…" : "Run sensitivity"}</button>}>
-      {!grid ? (
-        <p className="text-sm text-muted">See how the fair value swings with your two biggest levers.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="border-collapse text-sm">
-            <thead>
-              <tr><th className="p-2 text-left text-xs text-faint">disc ↓ / growth →</th>{growths.map((g, i) => <th key={i} className="p-2 text-right font-mono text-xs text-muted">{pct(g, 0)}</th>)}</tr>
-            </thead>
-            <tbody>
-              {grid.map((row, i) => (
-                <tr key={i}>
-                  <td className="p-2 font-mono text-xs text-muted">{pct(discounts[i], 0)}</td>
-                  {row.map((fv, j) => {
-                    const above = fv != null && currentPrice != null && fv >= currentPrice;
-                    return <td key={j} className={`p-2 text-right font-mono ${fv == null ? "text-faint" : above ? "text-positive" : "text-negative"}`} style={{ background: fv == null ? undefined : above ? "rgba(62,207,142,0.08)" : "rgba(255,107,107,0.06)" }}>{price(fv)}</td>;
-                  })}
+    <Panel title="Diagnostics" hint="model applicability, exclusions, and weight rebalancing">
+      <div className="grid gap-3 md:grid-cols-3">
+        <DiagStat label="Applicable models" value={`${blend.applicable_count ?? 0}`} />
+        <DiagStat label="Excluded models" value={`${blend.excluded_count ?? 0}`} tone={(blend.excluded_count ?? 0) > 0 ? "neutral" : "positive"} />
+        <DiagStat label="Weights" value={blend.renormalized ? "Reweighted" : "As requested"} tone={blend.renormalized ? "neutral" : "positive"} />
+      </div>
+      <div className="mt-5 overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="py-2 pr-4 font-medium">Model</th>
+              <th className="py-2 pr-4 text-right font-medium">Fair value</th>
+              <th className="py-2 pr-4 text-right font-medium">Requested</th>
+              <th className="py-2 pr-4 text-right font-medium">Applied</th>
+              <th className="py-2 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {models.map((row: any) => {
+              const meta = MODELS[row.model] ?? { label: row.model };
+              return (
+                <tr key={row.model} className="border-t border-line">
+                  <td className="py-2 pr-4">{meta.label}</td>
+                  <td className="py-2 pr-4 text-right font-mono">{price(row.fair_value_per_share)}</td>
+                  <td className="py-2 pr-4 text-right font-mono">{pct(row.requested_weight, 0)}</td>
+                  <td className="py-2 pr-4 text-right font-mono">{pct(row.applied_weight, 0)}</td>
+                  <td className={row.included_in_blend ? "py-2 text-positive" : "py-2 text-muted"}>
+                    {row.included_in_blend ? "Included" : row.reason ?? "Excluded"}
+                  </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="mt-2 text-xs text-faint">Rows = discount rate · columns = FCF growth. Current price {price(currentPrice)}.</p>
-        </div>
-      )}
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function DiagStat({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "positive" | "neutral" | "negative" }) {
+  const color = tone === "positive" ? "text-positive" : tone === "negative" ? "text-negative" : "text-text";
+  return (
+    <div className="rounded-lg border border-line bg-surface/60 px-4 py-3">
+      <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
+      <div className={`mt-1.5 font-mono text-lg ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function SensitivityDiagnostics({ sensitivity, currentPrice }: { sensitivity?: Record<string, any>; currentPrice?: number | null }) {
+  if (!sensitivity) {
+    return null;
+  }
+  const grids = [sensitivity.discount_growth, sensitivity.discount_terminal, sensitivity.multiples].filter(Boolean);
+  return (
+    <Panel title="Sensitivity" hint="computed by the same valuation service as the main fair value">
+      <div className="grid gap-5 xl:grid-cols-3">
+        {grids.map((grid) => <SensitivityTable key={grid.label} grid={grid} currentPrice={currentPrice} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function SensitivityTable({ grid, currentPrice }: { grid: any; currentPrice?: number | null }) {
+  return (
+    <div className="overflow-x-auto">
+      <div className="mb-2 text-[11px] uppercase tracking-wider text-muted">{grid.label}</div>
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th className="p-2 text-left text-xs text-faint">{grid.row_label} ↓ / {grid.column_label} →</th>
+            {grid.columns.map((col: any) => <th key={col.label} className="p-2 text-right font-mono text-xs text-muted">{col.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {grid.values.map((row: (number | null)[], i: number) => (
+            <tr key={grid.rows[i]?.label ?? i}>
+              <td className="p-2 font-mono text-xs text-muted">{grid.rows[i]?.label}</td>
+              {row.map((fv, j) => {
+                const above = fv != null && currentPrice != null && fv >= currentPrice;
+                return <td key={j} className={`p-2 text-right font-mono ${fv == null ? "text-faint" : above ? "text-positive" : "text-negative"}`} style={{ background: fv == null ? undefined : above ? "rgba(62,207,142,0.08)" : "rgba(255,107,107,0.06)" }}>{price(fv)}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ValuationHistory({ rows }: { rows: any[] }) {
+  if (!rows.length) {
+    return null;
+  }
+  return (
+    <Panel title="History" hint="recent valuations saved from this page">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="py-2 pr-4 font-medium">Date</th>
+              <th className="py-2 pr-4 text-right font-medium">Price</th>
+              <th className="py-2 pr-4 text-right font-medium">Fair value</th>
+              <th className="py-2 text-right font-medium">MoS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 6).map((row) => (
+              <tr key={row.id} className="border-t border-line">
+                <td className="py-2 pr-4 text-muted">{row.valuation_date ? new Date(row.valuation_date).toLocaleString() : "—"}</td>
+                <td className="py-2 pr-4 text-right font-mono">{price(row.current_price)}</td>
+                <td className="py-2 pr-4 text-right font-mono">{price(row.blended_fair_value)}</td>
+                <td className={`py-2 text-right font-mono ${signClass(row.margin_of_safety)}`}>{pct(row.margin_of_safety, 1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </Panel>
   );
 }

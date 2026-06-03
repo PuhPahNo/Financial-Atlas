@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from ..paper_trading import service
-from ..paper_trading.schemas import BacktestRequest
+from ..paper_trading.schemas import BacktestRequest, ParameterSweepRequest
 
 router = APIRouter(prefix="/api/v1")
 
@@ -19,6 +19,11 @@ def envelope(data: Any, *, served_by: str | None = "derived") -> dict:
 def run_backtest(payload: BacktestRequest):
     result = service.run_backtest(payload)
     return envelope(result, served_by=result.get("served_by", "derived"))
+
+
+@router.post("/backtests/sweep")
+def run_parameter_sweep(payload: ParameterSweepRequest):
+    return envelope(service.run_parameter_sweep(payload))
 
 
 @router.get("/backtests/{run_id}")

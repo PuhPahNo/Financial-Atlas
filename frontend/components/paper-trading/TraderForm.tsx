@@ -18,11 +18,30 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
   const [allocs, setAllocs] = useState<Alloc[]>(seed?.allocations.map((a) => ({ strategy_id: a.strategy_id, weight: a.weight })) ?? []);
 
   const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models]);
+  const seedById = useMemo(() => new Map((seed?.allocations ?? []).map((a) => [a.strategy_id, a])), [seed]);
   const used = new Set(allocs.map((a) => a.strategy_id));
   const available = models.filter((m) => !used.has(m.id));
   const total = allocs.reduce((s, a) => s + a.weight, 0);
   const cashPct = Math.max(0, 100 - total);
+  const reconciled = total + cashPct;
   const valid = name.trim().length > 0 && total <= 100 && allocs.length > 0;
+  const previewRows = seed ? Array.from(new Set([
+    ...seed.allocations.map((a) => a.strategy_id),
+    ...allocs.map((a) => a.strategy_id),
+  ])).map((id) => {
+    const current = seed.allocations.find((a) => a.strategy_id === id)?.weight ?? 0;
+    const target = allocs.find((a) => a.strategy_id === id)?.weight ?? 0;
+    const m = byId.get(id);
+    const saved = seedById.get(id);
+    const delta = target - current;
+    return {
+      id, current, target, delta,
+      name: m?.name ?? saved?.name ?? `Strategy ${id}`,
+      category: m?.category ?? saved?.category ?? null,
+      archived: saved?.archived && !m,
+      trade: cash * delta / 100,
+    };
+  }).filter((row) => row.current !== row.target || row.archived) : [];
 
   const addStrategy = (id: number) => {
     if (!id || used.has(id)) return;
@@ -79,7 +98,7 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <span className="eyebrow">Capital allocation</span>
-              <span className="mono" style={{ fontSize: 12, color: total > 100 ? "var(--neg)" : "var(--text-3)" }}>{total.toFixed(0)}% invested · {cashPct.toFixed(0)}% cash</span>
+              <span className="mono" style={{ fontSize: 12, color: total > 100 ? "var(--neg)" : "var(--text-3)" }}>{total.toFixed(0)}% invested · {cashPct.toFixed(0)}% cash · {reconciled.toFixed(0)}% total</span>
             </div>
 
             {allocs.length === 0 && <div style={{ fontSize: 13, color: "var(--text-3)", padding: "4px 0 12px" }}>Add at least one strategy to fund this trader.</div>}
@@ -87,12 +106,14 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {allocs.map((a) => {
                 const m = byId.get(a.strategy_id);
+                const saved = seedById.get(a.strategy_id);
                 const hue = (m && CAT_HUES[m.category]) || "var(--accent)";
                 return (
                   <div key={a.strategy_id} style={{ background: "var(--surface-2)", borderRadius: "var(--r-sm)", padding: "12px 14px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                       <CatDot hue={hue} />
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m?.name ?? `Strategy ${a.strategy_id}`}</span>
+                      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m?.name ?? saved?.name ?? `Strategy ${a.strategy_id}`}</span>
+                      {!m && saved?.archived && <span style={{ fontSize: 10.5, color: "var(--text-3)", border: "1px solid var(--border)", borderRadius: 999, padding: "2px 7px" }}>Archived</span>}
                       <span className="mono" style={{ fontSize: 12.5, color: "var(--text-2)" }}>{fmt.usd0(cash * a.weight / 100)}</span>
                       <IconBtn icon="x" size={26} title="Remove" onClick={() => remove(a.strategy_id)} />
                     </div>
@@ -113,6 +134,34 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
               </div>
             )}
             {total > 100 && <div style={{ fontSize: 12, color: "var(--neg)", marginTop: 10 }}>Allocations exceed 100% — trim them to fund this trader.</div>}
+
+            {seed && (
+              <div style={{ marginTop: 16, padding: "12px 14px", background: "var(--surface-2)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span className="eyebrow">Rebalance preview</span>
+                  <span className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>{(100 - (seed.invested_pct ?? 0)).toFixed(0)}% cash → {cashPct.toFixed(0)}% cash</span>
+                </div>
+                {previewRows.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>No allocation changes.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    {previewRows.map((row) => {
+                      const hue = (row.category && CAT_HUES[row.category]) || "var(--accent)";
+                      const action = row.delta > 0 ? "Buy" : row.delta < 0 ? "Sell" : "Hold";
+                      return (
+                        <div key={row.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                          <CatDot hue={hue} />
+                          <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--text-2)" }}>{row.name}{row.archived ? " (archived)" : ""}</span>
+                          <span className="mono" style={{ color: row.delta > 0 ? "var(--pos)" : row.delta < 0 ? "var(--neg)" : "var(--text-3)" }}>{action}</span>
+                          <span className="mono" style={{ color: "var(--text-3)" }}>{row.current}% → {row.target}%</span>
+                          <span className="mono" style={{ color: row.trade >= 0 ? "var(--pos)" : "var(--neg)", minWidth: 72, textAlign: "right" }}>{row.trade >= 0 ? "+" : "-"}{fmt.usd0(Math.abs(row.trade))}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

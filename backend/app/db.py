@@ -90,7 +90,7 @@ class WatchlistItem(Base):
 
 def init_db() -> None:
     # Import feature model modules so their tables register with Base before create_all.
-    from .models import assistant, paper_trading  # noqa: F401
+    from .models import assistant, paper_trading, valuation  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

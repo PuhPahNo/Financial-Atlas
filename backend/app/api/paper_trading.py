@@ -8,7 +8,16 @@ from datetime import date
 from fastapi import APIRouter
 
 from ..paper_trading import accounts, portfolio, service
-from ..paper_trading.schemas import AccountCreate, AccountUpdate, PortfolioCreate, PortfolioRun, StrategyCreate, StrategyUpdate
+from ..paper_trading.schemas import (
+    AccountCreate,
+    AccountRebalanceRequest,
+    AccountUpdate,
+    PortfolioCreate,
+    PortfolioRun,
+    StrategyCreate,
+    StrategyUpdate,
+    StrategyValidationRequest,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -30,6 +39,11 @@ def strategies():
 @router.post("/paper-trading/strategies")
 def create_strategy(payload: StrategyCreate):
     return envelope(service.create_strategy(payload))
+
+
+@router.post("/paper-trading/strategies/validate")
+def validate_strategy(payload: StrategyValidationRequest):
+    return envelope(service.validate_strategy(payload))
 
 
 @router.get("/paper-trading/strategies/{strategy_id}")
@@ -92,6 +106,16 @@ def get_account(account_id: int):
 @router.put("/paper-trading/accounts/{account_id}")
 def update_account(account_id: int, payload: AccountUpdate):
     return envelope(accounts.update_account(account_id, payload))
+
+
+@router.post("/paper-trading/accounts/{account_id}/rebalance-preview")
+def rebalance_preview(account_id: int, payload: AccountRebalanceRequest):
+    return envelope(accounts.rebalance_preview(account_id, payload))
+
+
+@router.post("/paper-trading/accounts/{account_id}/rebalance")
+def rebalance_account(account_id: int, payload: AccountRebalanceRequest):
+    return envelope(accounts.rebalance_account(account_id, payload))
 
 
 @router.delete("/paper-trading/accounts/{account_id}")

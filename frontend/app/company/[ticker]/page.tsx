@@ -15,36 +15,40 @@ import Sparkline from "@/components/charts/Sparkline";
 
 export default function OverviewPage() {
   const ticker = String(useParams().ticker || "").toUpperCase();
-  const company = useApi(() => api.company(ticker), [ticker]);
-  const valuation = useApi(() => api.valuation(ticker), [ticker]);
-  const cfa = useApi(() => api.cashflowAnalysis(ticker, "annual"), [ticker]);
-  const analyst = useApi(() => api.analyst(ticker), [ticker]);
-  const news = useApi(() => api.news(ticker), [ticker]);
-  const peers = useApi(() => api.peers(ticker), [ticker]);
-  const prices = useApi(() => api.prices(ticker, "1y", "1d"), [ticker]);
+  const snapshot = useApi(() => api.companySnapshot(ticker), [ticker]);
 
-  const km = company.data?.key_metrics;
-  const periods = cfa.data?.periods ?? [];
-  const closes = (prices.data?.bars ?? []).map((b: any) => b.close).filter((c: number | null) => c != null);
+  const data = snapshot.data;
+  const company = data?.company;
+  const valuation = data?.valuation;
+  const cashFlow = data?.cash_flow_analysis;
+  const analyst = data?.analyst;
+  const news = data?.news;
+  const peers = data?.peers;
+  const priceHistory = data?.prices;
+  const warnings = data?.warnings ?? [];
+
+  const km = company?.key_metrics;
+  const periods = cashFlow?.periods ?? [];
+  const closes = (priceHistory?.bars ?? []).map((b: any) => b.close).filter((c: number | null) => c != null);
 
   const insights = [
-    valuationInsight(valuation.data ?? {}),
+    valuationInsight(valuation ?? {}),
     growthInsight(periods),
     fcfQualityInsight(periods),
     healthInsight(km ?? {}),
   ];
 
   return (
-    <StateView loading={company.loading} error={company.error} empty={!company.data}>
-      {company.data && (
+    <StateView loading={snapshot.loading} error={snapshot.error} empty={!company}>
+      {company && (
         <div className="space-y-7">
           {/* Hero */}
           <div className="flex flex-wrap items-end justify-between gap-5">
             <div>
               <div className="text-xs uppercase tracking-[0.14em] text-accent-2">
-                {[company.data.profile.exchange, company.data.profile.industry].filter(Boolean).join(" · ") || "—"}
+                {[company.profile.exchange, company.profile.industry].filter(Boolean).join(" · ") || "—"}
               </div>
-              <h1 className="mt-2 font-serif text-4xl font-semibold tracking-tightest">{company.data.profile.name ?? ticker}</h1>
+              <h1 className="mt-2 font-serif text-4xl font-semibold tracking-tightest">{company.profile.name ?? ticker}</h1>
               <div className="mt-2 font-mono text-sm text-muted">{ticker}</div>
             </div>
             <div className="flex items-end gap-5">
@@ -58,7 +62,27 @@ export default function OverviewPage() {
             </div>
           </div>
 
-          <SourceBadge servedBy={company.meta?.served_by} stale={company.meta?.stale} />
+          <div className="flex flex-wrap items-center gap-3">
+            <SourceBadge servedBy={data?.sections?.company?.served_by ?? snapshot.meta?.served_by} stale={data?.sections?.company?.stale ?? snapshot.meta?.stale} />
+            {warnings.length > 0 && (
+              <span className="rounded-full border border-line bg-surface-2/60 px-2.5 py-1 text-[11px] text-muted">
+                {warnings.length} provider {warnings.length === 1 ? "note" : "notes"}
+              </span>
+            )}
+          </div>
+
+          {warnings.length > 0 && (
+            <div className="rounded-lg border border-line bg-surface-2/35 px-4 py-3 text-xs text-muted">
+              <div className="mb-1 text-[11px] uppercase tracking-wider text-faint">Provider notes</div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {warnings.slice(0, 4).map((warning: any, i: number) => (
+                  <span key={`${warning.section}-${warning.code}-${i}`}>
+                    <span className="text-text">{warning.section?.replaceAll("_", " ") ?? "Data"}</span>: {warning.message}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Insight strip — leads with the answer */}
           <InsightStrip insights={insights} />
@@ -85,8 +109,8 @@ export default function OverviewPage() {
                 ["52-Wk High", price(km?.week52_high)],
               ]} />
               <Panel title="Peers" hint="similar companies — click to compare">
-                <StateView loading={peers.loading} empty={!peers.data?.peers?.length} emptyLabel="No peer data.">
-                  <PeerTable peers={(peers.data?.peers ?? []).slice(0, 8)} />
+                <StateView loading={false} empty={!peers?.peers?.length} emptyLabel="No peer data.">
+                  <PeerTable peers={(peers?.peers ?? []).slice(0, 8)} />
                 </StateView>
               </Panel>
             </div>
@@ -94,13 +118,13 @@ export default function OverviewPage() {
             {/* Analyst + news */}
             <div className="space-y-5">
               <Panel title="Wall Street view">
-                <StateView loading={analyst.loading} empty={!analyst.data?.analyst} emptyLabel="No analyst coverage available.">
-                  {analyst.data?.analyst && <AnalystSnapshot analyst={analyst.data.analyst} currentPrice={km?.price} />}
+                <StateView loading={false} empty={!analyst?.analyst} emptyLabel="No analyst coverage available.">
+                  {analyst?.analyst && <AnalystSnapshot analyst={analyst.analyst} currentPrice={km?.price} />}
                 </StateView>
               </Panel>
               <Panel title="Recent news" right={<Link href={`/company/${ticker}/filings`} className="text-xs text-accent hover:underline">Filings →</Link>}>
-                <StateView loading={news.loading} empty={!news.data?.articles?.length} emptyLabel="No recent news.">
-                  <NewsList articles={news.data?.articles ?? []} />
+                <StateView loading={false} empty={!news?.articles?.length} emptyLabel="No recent news.">
+                  <NewsList articles={news?.articles ?? []} />
                 </StateView>
               </Panel>
             </div>

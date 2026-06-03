@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { paperTradingApi } from "@/lib/paperTradingApi";
 import { Btn, CatDot, IconBtn } from "./ptkit";
 import { AreaChart, Donut, DONUT_PALETTE, drawdownOf, Pt } from "./ptcharts";
-import { fmt, CatMeta, Model, defaultBacktestWindow } from "./ptdata";
+import { fmt, CatMeta, Model, defaultBacktestWindow, metricStateLabel, metricStateTip } from "./ptdata";
 
 function StatBox({ label, value, tone }: { label: string; value: string | number; tone?: "pos" | "neg" }) {
   return (
@@ -76,6 +76,8 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
               <span className="eyebrow" style={{ color: "var(--text-2)" }}>{cat.label}</span>
               <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: model.author === "You" ? "var(--accent-2)" : "var(--text-3)", background: model.author === "You" ? "var(--accent-soft)" : "var(--surface-3)" }}>
                 {model.author === "You" ? "Custom build" : "Atlas model"}</span>
+              <span title={metricStateTip(model)} style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: model.backtested ? "var(--pos)" : "var(--text-3)", background: model.backtested ? "var(--pos-soft)" : "var(--surface-3)" }}>
+                {metricStateLabel(model)}</span>
             </div>
             <h2 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600, lineHeight: 1.1 }}>{model.name}</h2>
           </div>
@@ -154,7 +156,7 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
       <div style={{ position: "sticky", bottom: 0, background: "linear-gradient(transparent, var(--surface-1) 22%)", padding: "18px 24px", display: "flex", gap: 10 }}>
         <Btn variant="primary" icon="play" iconFill onClick={() => onBacktest(model)} style={{ flex: 1 }}>Backtest in lab</Btn>
         {model.author === "You" && <Btn variant="soft" icon="edit" onClick={() => onEdit(model)}>Tune</Btn>}
-        {model.author === "You" && <IconBtn icon="trash" size={42} tone="danger" title="Delete" onClick={() => onDelete(model)} />}
+        {model.author === "You" && <IconBtn icon="trash" size={42} tone="danger" title="Archive model" onClick={() => onDelete(model)} />}
       </div>
     </div>
   );

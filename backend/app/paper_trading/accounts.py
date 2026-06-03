@@ -11,7 +11,7 @@ from ..backtesting.metrics import max_drawdown
 from ..core.errors import NotFoundError, ValidationError
 from ..db import session_scope
 from ..models.paper_trading import AccountAllocation, TraderAccount, TradingStrategy
-from .schemas import AccountCreate, AccountUpdate, normalize_tickers
+from .schemas import AccountCreate, AccountRebalanceRequest, AccountUpdate, normalize_tickers
 from .service import _strategy_view
 
 
@@ -24,9 +24,12 @@ def _account_view(account: TraderAccount, strategies: dict[int, TradingStrategy]
             "weight": a.weight,
             "name": st.name if st else f"Strategy {a.strategy_id}",
             "category": st.category if st else None,
+            "strategy_status": st.status if st else "missing",
+            "archived": bool(st and st.status != "active"),
             "dollars": round(account.starting_cash * a.weight / 100, 2),
         })
     invested = sum(a["weight"] for a in allocs)
+    cash = round(max(0.0, 100 - invested), 2)
     return {
         "id": account.id,
         "name": account.name,
@@ -36,7 +39,8 @@ def _account_view(account: TraderAccount, strategies: dict[int, TradingStrategy]
         "status": account.status,
         "allocations": allocs,
         "invested_pct": round(invested, 2),
-        "cash_pct": round(max(0.0, 100 - invested), 2),
+        "cash_pct": cash,
+        "reconciled_pct": round(invested + cash, 2),
         "created_at": account.created_at.isoformat() if account.created_at else None,
     }
 
@@ -49,15 +53,66 @@ def _strategies_map(session, account: TraderAccount) -> dict[int, TradingStrateg
     return {row.id: row for row in rows}
 
 
-def _validate_allocations(session, allocations) -> None:
+def _validate_allocations(session, allocations, *, allow_inactive_ids: set[int] | None = None) -> None:
+    allow_inactive_ids = allow_inactive_ids or set()
     total = 0.0
+    seen: set[int] = set()
     for a in allocations:
+        if a.strategy_id in seen:
+            raise ValidationError(f"Strategy {a.strategy_id} is allocated more than once")
+        seen.add(a.strategy_id)
         total += a.weight
         strat = session.get(TradingStrategy, a.strategy_id)
-        if not strat or strat.status != "active":
+        if not strat or (strat.status != "active" and a.strategy_id not in allow_inactive_ids):
             raise ValidationError(f"Strategy {a.strategy_id} not found or inactive")
     if total > 100.0001:
         raise ValidationError(f"Allocations sum to {total:.0f}% — they cannot exceed 100% of capital")
+
+
+def _rebalance_preview(account: TraderAccount, allocations, strategies: dict[int, TradingStrategy]) -> dict:
+    current = {a.strategy_id: float(a.weight) for a in account.allocations}
+    target = {a.strategy_id: float(a.weight) for a in allocations if a.weight > 0}
+    ids = sorted(set(current) | set(target))
+    orders = []
+    for sid in ids:
+        st = strategies.get(sid)
+        current_weight = current.get(sid, 0.0)
+        target_weight = target.get(sid, 0.0)
+        delta = target_weight - current_weight
+        current_dollars = account.starting_cash * current_weight / 100
+        target_dollars = account.starting_cash * target_weight / 100
+        action = "hold"
+        if delta > 0:
+            action = "buy"
+        elif delta < 0:
+            action = "sell"
+        orders.append({
+            "strategy_id": sid,
+            "name": st.name if st else f"Strategy {sid}",
+            "category": st.category if st else None,
+            "strategy_status": st.status if st else "missing",
+            "archived": bool(st and st.status != "active"),
+            "current_weight": round(current_weight, 2),
+            "target_weight": round(target_weight, 2),
+            "delta_weight": round(delta, 2),
+            "current_dollars": round(current_dollars, 2),
+            "target_dollars": round(target_dollars, 2),
+            "trade_dollars": round(target_dollars - current_dollars, 2),
+            "action": action,
+        })
+    current_invested = sum(current.values())
+    target_invested = sum(target.values())
+    return {
+        "account_id": account.id,
+        "starting_cash": account.starting_cash,
+        "current_invested_pct": round(current_invested, 2),
+        "target_invested_pct": round(target_invested, 2),
+        "current_cash_pct": round(max(0.0, 100 - current_invested), 2),
+        "target_cash_pct": round(max(0.0, 100 - target_invested), 2),
+        "current_reconciled_pct": round(current_invested + max(0.0, 100 - current_invested), 2),
+        "target_reconciled_pct": round(target_invested + max(0.0, 100 - target_invested), 2),
+        "orders": orders,
+    }
 
 
 def _tokens(value: str) -> set[str]:
@@ -126,7 +181,8 @@ def update_account(account_id: int, payload: AccountUpdate) -> dict:
             if field in data and data[field] is not None:
                 setattr(account, field, data[field])
         if "allocations" in data and data["allocations"] is not None:
-            _validate_allocations(session, payload.allocations)
+            existing_ids = {a.strategy_id for a in account.allocations}
+            _validate_allocations(session, payload.allocations, allow_inactive_ids=existing_ids)
             for existing in list(account.allocations):
                 session.delete(existing)
             session.flush()
@@ -136,6 +192,39 @@ def update_account(account_id: int, payload: AccountUpdate) -> dict:
         session.flush()
         session.refresh(account)
         return {"account": _account_view(account, _strategies_map(session, account))}
+
+
+def rebalance_preview(account_id: int, payload: AccountRebalanceRequest) -> dict:
+    with session_scope() as session:
+        account = session.get(TraderAccount, account_id)
+        if not account or account.status != "active":
+            raise NotFoundError(f"Trader account {account_id} not found")
+        existing_ids = {a.strategy_id for a in account.allocations}
+        _validate_allocations(session, payload.allocations, allow_inactive_ids=existing_ids)
+        ids = set(existing_ids) | {a.strategy_id for a in payload.allocations}
+        strategies = {s.id: s for s in session.query(TradingStrategy).filter(TradingStrategy.id.in_(ids)).all()} if ids else {}
+        return {"preview": _rebalance_preview(account, payload.allocations, strategies)}
+
+
+def rebalance_account(account_id: int, payload: AccountRebalanceRequest) -> dict:
+    with session_scope() as session:
+        account = session.get(TraderAccount, account_id)
+        if not account or account.status != "active":
+            raise NotFoundError(f"Trader account {account_id} not found")
+        existing_ids = {a.strategy_id for a in account.allocations}
+        _validate_allocations(session, payload.allocations, allow_inactive_ids=existing_ids)
+        ids = set(existing_ids) | {a.strategy_id for a in payload.allocations}
+        strategies = {s.id: s for s in session.query(TradingStrategy).filter(TradingStrategy.id.in_(ids)).all()} if ids else {}
+        preview = _rebalance_preview(account, payload.allocations, strategies)
+        for existing in list(account.allocations):
+            session.delete(existing)
+        session.flush()
+        for a in payload.allocations:
+            if a.weight > 0:
+                session.add(AccountAllocation(account_id=account.id, strategy_id=a.strategy_id, weight=a.weight))
+        session.flush()
+        session.refresh(account)
+        return {"account": _account_view(account, _strategies_map(session, account)), "preview": preview}
 
 
 def delete_account(account_id: int) -> dict:
@@ -203,6 +292,17 @@ def _downsample(points: list[dict], n: int = 120) -> list[dict]:
     return [points[min(round(i * step), len(points) - 1)] for i in range(n)]
 
 
+def _drawdown_curve(points: list[dict]) -> list[dict]:
+    peak = None
+    out = []
+    for point in points:
+        equity = float(point["equity"])
+        peak = equity if peak is None else max(peak, equity)
+        dd = (equity - peak) / peak if peak else 0.0
+        out.append({"date": point["date"], "drawdown": round(dd, 4)})
+    return out
+
+
 def account_performance(account_id: int, start: date | None = None, end: date | None = None) -> dict:
     if start is None or end is None:
         start, end = _default_window()
@@ -238,11 +338,14 @@ def account_performance(account_id: int, start: date | None = None, end: date | 
         eq = {str(p["date"]): float(p["equity"]) for p in curve}
         bm = {str(p["date"]): float(p["benchmark_equity"]) for p in curve if p.get("benchmark_equity") is not None}
         final = curve[-1]["equity"] if curve else dollars
+        turnover = sum(abs(float(t.get("value") or 0)) for t in res.get("trades", [])) / dollars if dollars else 0.0
         per.append({
             "strategy_id": sid, "name": view["name"], "category": view["category"],
+            "strategy_status": view.get("status", "active"), "archived": view.get("status") != "active",
             "weight": weight, "dollars": round(dollars, 2),
             "final": round(final, 2), "pnl": round(final - dollars, 2),
             "return_pct": round((final / dollars - 1) * 100, 2) if dollars else 0.0,
+            "turnover": round(turnover, 4),
             "eq": eq, "bm": bm, "dates": sorted(dates),
         })
         warnings.extend(res.get("warnings", [])[:1])
@@ -273,9 +376,40 @@ def account_performance(account_id: int, start: date | None = None, end: date | 
     dd = max_drawdown([{"equity": b["equity"]} for b in blended]) if blended else 0.0
 
     contributions = sorted(
-        [{k: p[k] for k in ("strategy_id", "name", "category", "weight", "dollars", "final", "pnl", "return_pct")} for p in per],
+        [{k: p[k] for k in ("strategy_id", "name", "category", "strategy_status", "archived", "weight", "dollars", "final", "pnl", "return_pct", "turnover")} for p in per],
         key=lambda c: c["pnl"], reverse=True,
     )
+    contribution_final = round(sum(c["final"] for c in contributions), 2)
+    weights = [c["weight"] / 100 for c in contributions]
+    risk = {
+        "gross_exposure": round(invested_dollars / starting_cash, 4) if starting_cash else 0.0,
+        "cash_pct": round(cash_dollars / starting_cash, 4) if starting_cash else 0.0,
+        "concentration": round(max(weights), 4) if weights else 0.0,
+        "herfindahl": round(sum(w * w for w in weights), 4),
+        "turnover": round(sum(c["turnover"] * c["dollars"] for c in contributions) / starting_cash, 4) if starting_cash else 0.0,
+        "max_drawdown": round(dd, 4),
+    }
+    attribution = {
+        "top_contributors": contributions[:3],
+        "laggards": sorted(contributions, key=lambda c: c["pnl"])[:3],
+        "allocation": [
+            {
+                "strategy_id": c["strategy_id"],
+                "name": c["name"],
+                "category": c["category"],
+                "weight": c["weight"],
+                "dollars": c["dollars"],
+                "archived": c.get("archived", False),
+            }
+            for c in contributions
+        ],
+        "reconciliation": {
+            "contribution_final": contribution_final,
+            "cash_dollars": round(cash_dollars, 2),
+            "current_value": round(current, 2),
+            "difference": round(current - contribution_final - cash_dollars, 2),
+        },
+    }
 
     return {
         "account_id": account_id,
@@ -288,6 +422,9 @@ def account_performance(account_id: int, start: date | None = None, end: date | 
         "alpha": round(total_return - bench_return, 4),
         "max_drawdown": round(dd, 4),
         "equity": _downsample(blended),
+        "drawdown_curve": _downsample(_drawdown_curve(blended)),
+        "risk": risk,
+        "attribution": attribution,
         "contributions": contributions,
         "warnings": list(dict.fromkeys(warnings))[:4],
     }

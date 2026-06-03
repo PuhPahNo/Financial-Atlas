@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Btn, CatDot, Icon, Slider, TextInput } from "./ptkit";
 import {
-  CatMeta, Model, Rule, SIGNALS, REF_OPTIONS, blankRule, ruleSummary, ruleToPayload, rulesFromModel,
+  CatMeta, Model, Rule, SIGNALS, REF_OPTIONS, blankRule, ruleSummary, ruleToPayload, rulesFromModel, validateRuleDraft,
 } from "./ptdata";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -38,7 +38,8 @@ export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
 
   const cat = cats.find((c) => c.id === category) ?? cats[0];
   const sigMeta = SIGNALS.find((s) => s.id === rule.signalType)!;
-  const valid = name.trim().length > 1 && rule.instrument.trim().length >= 1;
+  const issues = validateRuleDraft(category, name, rule);
+  const valid = issues.length === 0;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0.92fr)", gap: 26, alignItems: "start", animation: "pt-fadeUp .3s var(--ease)" }}>
@@ -154,7 +155,14 @@ export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
             {seed ? "Save changes" : "Create & track"}</Btn>
           <Btn variant="soft" onClick={onCancel}>Cancel</Btn>
         </div>
-        {!valid && <div style={{ fontSize: 12, color: "var(--text-3)", textAlign: "center" }}>Add a model name and an instrument ticker to save.</div>}
+        {!valid && (
+          <div style={{ padding: "10px 12px", borderRadius: "var(--r-sm)", border: "1px solid var(--neg)", background: "var(--neg-soft)", color: "var(--text-1)", fontSize: 12, lineHeight: 1.45 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Fix before saving</div>
+            <ul style={{ margin: 0, paddingLeft: 17 }}>
+              {issues.map((issue) => <li key={`${issue.field}-${issue.message}`}>{issue.message}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

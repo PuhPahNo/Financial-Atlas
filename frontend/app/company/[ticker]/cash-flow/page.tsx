@@ -24,6 +24,8 @@ export default function CashFlowPage() {
   const { data, meta, loading, error } = useApi(() => api.cashflowAnalysis(ticker, period), [ticker, period]);
 
   const periods = data?.periods ?? [];
+  const scorecard = data?.scorecard;
+  const scorecards = scorecard?.cards ?? [];
   const label = (p: any) => (p.period === "FY" ? String(p.fiscal_year) : `${String(p.fiscal_year).slice(2)}${p.period}`);
   const chrono = periods.slice(0, 8).slice().reverse();
 
@@ -52,6 +54,41 @@ export default function CashFlowPage() {
 
       <StateView loading={loading} error={error} empty={!periods.length} emptyLabel={`No cash-flow statements available for ${ticker} yet.`}>
         <InsightStrip insights={insights} />
+
+        {scorecards.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <div className="text-[11px] uppercase tracking-wider text-muted">Cash-flow quality scorecard</div>
+              <div className="font-mono text-sm text-accent-2">
+                {scorecard?.overall_score == null ? "N/M" : `${scorecard.overall_score}/100`}
+              </div>
+            </div>
+            <div className="metric-grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5">
+              {scorecards.map((card: any) => (
+                <div key={card.id} className="px-5 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider text-muted">{card.label}</div>
+                      <div className={`mt-1.5 font-mono text-2xl ${toneClass(card.tone)}`}>
+                        {card.score == null ? "N/M" : card.score}
+                      </div>
+                    </div>
+                    <span className={`mt-0.5 rounded-full px-2 py-0.5 text-[11px] ${tonePill(card.tone)}`}>{card.tone}</span>
+                  </div>
+                  <p className="mt-3 min-h-12 text-xs leading-relaxed text-muted">{card.summary}</p>
+                  <div className="mt-3 space-y-1.5">
+                    {(card.drivers ?? []).slice(0, 2).map((driver: any) => (
+                      <div key={driver.label} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="truncate text-faint" title={driver.reason}>{driver.label}</span>
+                        <span className={`shrink-0 font-mono ${toneClass(driver.status)}`}>{formatDriver(driver)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <Panel title="Where operating cash went" hint="each year's operating cash flow split across uses">
           {hasOcf ? (
@@ -112,6 +149,25 @@ export default function CashFlowPage() {
   );
 }
 
+function toneClass(tone: string) {
+  if (tone === "positive") return "text-positive";
+  if (tone === "negative") return "text-negative";
+  return "text-text";
+}
+
+function tonePill(tone: string) {
+  if (tone === "positive") return "bg-positive/10 text-positive";
+  if (tone === "negative") return "bg-negative/10 text-negative";
+  return "bg-surface-2 text-muted";
+}
+
+function formatDriver(driver: { label: string; value: number | null }) {
+  if (driver.value == null) return "N/M";
+  if (driver.label.includes("/ FCF")) return `${driver.value.toFixed(1)}x`;
+  if (driver.label.includes("returned") || driver.label.includes("debt")) return money(driver.value);
+  return pct(driver.value, driver.label.includes("CAGR") ? 1 : 0);
+}
+
 const METRICS: { label: string; field: string; fmt: (v: number | null) => string }[] = [
   { label: "Operating Cash Flow", field: "operating_cash_flow", fmt: (v) => money(v) },
   { label: "CapEx", field: "capex", fmt: (v) => money(v) },
@@ -124,6 +180,8 @@ const METRICS: { label: string; field: string; fmt: (v: number | null) => string
   { label: "Dividends", field: "dividends", fmt: (v) => money(v) },
   { label: "Capital Returned", field: "capital_returned", fmt: (v) => money(v) },
   { label: "Net Debt Issuance", field: "net_debt_issuance", fmt: (v) => money(v) },
+  { label: "Net Debt", field: "net_debt", fmt: (v) => money(v) },
+  { label: "Net Debt / FCF", field: "net_debt_to_fcf", fmt: (v) => v == null ? "N/M" : `${v.toFixed(1)}x` },
   { label: "SBC % of OCF", field: "sbc_pct_ocf", fmt: (v) => pct(v) },
   { label: "Reinvestment Rate", field: "reinvestment_rate", fmt: (v) => pct(v) },
 ];

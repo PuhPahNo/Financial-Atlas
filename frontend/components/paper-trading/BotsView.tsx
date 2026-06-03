@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { CatDot, Icon, IconBtn, Pill, PtTip, Segmented, Btn, TextInput, Empty } from "./ptkit";
 import { Sparkline } from "./ptcharts";
-import { fmt, CatMeta, Model, STAT_TIPS } from "./ptdata";
+import { fmt, CatMeta, Model, STAT_TIPS, metricStateLabel, metricStateTip } from "./ptdata";
 
 function MiniStat({ label, value, tone, tip, align }: { label: string; value: string; tone?: "pos" | "neg"; tip: string; align?: "left" | "right" }) {
   return (
@@ -35,12 +35,17 @@ export function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }:
             <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999,
               color: model.author === "You" ? "var(--accent-2)" : "var(--text-3)", background: model.author === "You" ? "var(--accent-soft)" : "var(--surface-3)" }}>
               {model.author === "You" ? "Custom" : "Atlas"}</span>
+            <PtTip tip={metricStateTip(model)}>
+              <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999,
+                color: model.backtested ? "var(--pos)" : "var(--text-3)", background: model.backtested ? "var(--pos-soft)" : "var(--surface-3)" }}>
+                {metricStateLabel(model)}</span>
+            </PtTip>
           </div>
           <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-1)", lineHeight: 1.2 }}>{model.name}</div>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, opacity: hover ? 1 : 0, transform: hover ? "none" : "translateX(6px)", transition: "opacity .15s, transform .15s" }} onClick={(e) => e.stopPropagation()}>
           {model.author === "You" && <IconBtn icon="edit" size={28} title="Edit parameters" onClick={() => onEdit(model)} />}
-          {model.author === "You" && <IconBtn icon="trash" size={28} tone="danger" title="Delete model" onClick={() => onDelete(model)} />}
+          {model.author === "You" && <IconBtn icon="trash" size={28} tone="danger" title="Archive model" onClick={() => onDelete(model)} />}
         </div>
         <button onClick={(e) => { e.stopPropagation(); onToggleFav(model.id); }} title="Favorite"
           style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", cursor: "pointer",
@@ -56,8 +61,8 @@ export function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }:
         <MiniStat label="Return" value={fmt.pct(model.stats.cagr)} tone={up ? "pos" : "neg"} tip={STAT_TIPS.cagr} />
         <MiniStat label="Sharpe" value={model.stats.sharpe.toFixed(2)} tip={STAT_TIPS.sharpe} />
         <MiniStat label="Max DD" value={model.stats.maxDD.toFixed(1) + "%"} tone="neg" tip={STAT_TIPS.maxDD} align="right" />
-        <PtTip tip={model.backtested ? STAT_TIPS.winRate : "Not backtested yet — open it to run a backtest on real prices."} align="right">
-          <Pill tone="accent">{model.backtested ? `Win ${model.stats.winRate.toFixed(0)}%` : "New"}</Pill>
+        <PtTip tip={metricStateTip(model)} align="right">
+          <Pill tone={model.backtested ? "pos" : "accent"}>{model.backtested ? `Win ${model.stats.winRate.toFixed(0)}%` : metricStateLabel(model)}</Pill>
         </PtTip>
       </div>
     </div>

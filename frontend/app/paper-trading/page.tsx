@@ -111,8 +111,8 @@ export default function PaperTradingPage() {
   }
   async function remove(m: Model) {
     setDelTarget(null); setDetail(null);
-    try { await paperTradingApi.deleteStrategy(m.id); await refresh(); flash(`Deleted “${m.name}”`); }
-    catch (e: any) { flash(e.message || "Could not delete"); }
+    try { await paperTradingApi.deleteStrategy(m.id); await refresh(); flash(`Archived “${m.name}”`); }
+    catch (e: any) { flash(e.message || "Could not archive"); }
   }
   const onToggleFav = (id: number) => setFavorites(toggleFavorite(id));
 
@@ -127,8 +127,8 @@ export default function PaperTradingPage() {
   }
   async function removeTrader(a: TraderAccount) {
     setTraderDel(null); setTraderDetail(null);
-    try { await paperTradingApi.deleteAccount(a.id); await refresh(); flash(`Deleted “${a.name}”`); }
-    catch (e: any) { flash(e.message || "Could not delete"); }
+    try { await paperTradingApi.deleteAccount(a.id); await refresh(); flash(`Archived “${a.name}”`); }
+    catch (e: any) { flash(e.message || "Could not archive"); }
   }
   const editTrader = (a: TraderAccount) => { setTraderDetail(null); setTraderForm({ open: true, seed: a }); };
 
@@ -214,8 +214,9 @@ export default function PaperTradingPage() {
         <ModelDetail model={detail} cat={detailCat} onClose={() => setDetail(null)} onEdit={openBuilder} onBacktest={(m) => openBacktest(m.id)} onDelete={setDelTarget} onBacktested={refresh} />
       </SlideOver>
 
-      <ConfirmDialog open={!!delTarget} title="Delete this model?"
-        body={delTarget ? `“${delTarget.name}” will be removed from your workspace. This can't be undone.` : ""}
+      <ConfirmDialog open={!!delTarget} title="Archive this model?"
+        body={delTarget ? `“${delTarget.name}” will leave the active model list. Historical backtests and account allocations keep their stored snapshots.` : ""}
+        confirmLabel="Archive"
         onClose={() => setDelTarget(null)} onConfirm={() => delTarget && remove(delTarget)} />
 
       <SlideOver open={!!traderDetail} onClose={() => setTraderDetail(null)} width={520}>
@@ -224,8 +225,9 @@ export default function PaperTradingPage() {
 
       <TraderForm key={`${traderForm.open ? "o" : "c"}-${traderForm.seed?.id ?? "new"}`} open={traderForm.open} seed={traderForm.seed} models={models} onSave={saveTrader} onClose={() => setTraderForm({ open: false, seed: null })} />
 
-      <ConfirmDialog open={!!traderDel} title="Delete this trader?"
-        body={traderDel ? `“${traderDel.name}” and its allocations will be removed. This can't be undone.` : ""}
+      <ConfirmDialog open={!!traderDel} title="Archive this trader?"
+        body={traderDel ? `“${traderDel.name}” will leave the active trader list. Historical account context is preserved in local records.` : ""}
+        confirmLabel="Archive"
         onClose={() => setTraderDel(null)} onConfirm={() => traderDel && removeTrader(traderDel)} />
 
       {toast && (

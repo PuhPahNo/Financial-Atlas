@@ -28,20 +28,48 @@ export default function ScreenerPage() {
   const [count, setCount] = useState(0);
   const [ingestInput, setIngestInput] = useState("");
   const [ingesting, setIngesting] = useState(false);
+  const [warming, setWarming] = useState(false);
+  const [lastJob, setLastJob] = useState<any | null>(null);
+  const [starterCount, setStarterCount] = useState(0);
   const [filters, setFilters] = useState<Filter[]>([{ metric: "fcf_margin", op: ">", value: 0.15 }]);
   const [sortMetric, setSortMetric] = useState("market_cap");
   const [results, setResults] = useState<any[]>([]);
   const [ran, setRan] = useState(false);
   const [running, setRunning] = useState(false);
 
-  async function refreshUniverse() { const u = await api.screenerUniverse(); setCount(u.data.count); }
+  async function refreshUniverse() {
+    const u = await api.screenerUniverse();
+    setCount(u.data.count);
+    setStarterCount(u.data.starter_universe_count ?? 0);
+  }
   useEffect(() => { refreshUniverse(); }, []);
 
   async function ingest() {
     const tickers = ingestInput.split(/[\s,]+/).map((t) => t.trim().toUpperCase()).filter(Boolean);
     if (!tickers.length) return;
     setIngesting(true);
-    try { await api.screenerIngest(tickers); setIngestInput(""); await refreshUniverse(); } finally { setIngesting(false); }
+    try {
+      const res = await api.screenerIngest(tickers);
+      setLastJob({ label: "Manual ingest", ...res.data });
+      setIngestInput("");
+      await refreshUniverse();
+    } finally { setIngesting(false); }
+  }
+  async function seedStarterUniverse() {
+    setIngesting(true);
+    try {
+      const res = await api.screenerSeed();
+      setLastJob({ label: "Starter universe", ...res.data });
+      await refreshUniverse();
+    } finally { setIngesting(false); }
+  }
+  async function warmDataset() {
+    setWarming(true);
+    try {
+      const res = await api.screenerWarm();
+      setLastJob({ label: "Warm job", ...res.data });
+      await refreshUniverse();
+    } finally { setWarming(false); }
   }
   async function run(f = filters) {
     setRunning(true);
@@ -80,17 +108,27 @@ export default function ScreenerPage() {
           </ol>
           <p>Or hit a <span className="text-text">preset</span> (top-right): <span className="text-text">Quality compounders</span> (durable cash generators), <span className="text-text">Deep value</span> (big margin of safety), <span className="text-text">Cash machines</span> (high FCF margin), <span className="text-text">Reasonable P/E</span>.</p>
           <p className="rounded-lg border border-line bg-surface-2/40 px-3 py-2 text-xs">
-            <span className="text-gold">Note:</span> the screener only covers companies you've <span className="text-text">ingested</span> into your dataset (currently {count}) — not the entire market yet. Use “Add companies” to grow it, or ask to pre-load a universe like the S&amp;P 500.
+            <span className="text-gold">Note:</span> the screener only covers companies you've <span className="text-text">ingested</span> into your dataset (currently {count}) — not the entire market yet. Use “Add companies” to grow it, or seed the starter universe ({starterCount}) below.
           </p>
         </div>
       </Collapsible>
 
       <Panel title="Add companies" hint="each pulls live SEC + market data, then caches">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input value={ingestInput} onChange={(e) => setIngestInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ingest()}
             placeholder="e.g. AAPL, MSFT, GOOGL, AMZN" className="flex-1 rounded-lg border border-line bg-surface-2 px-3.5 py-2.5 text-sm outline-none focus:border-accent" />
           <button onClick={ingest} disabled={ingesting} className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-glow disabled:opacity-50">{ingesting ? "Ingesting…" : "Ingest"}</button>
+          <button onClick={seedStarterUniverse} disabled={ingesting} className="rounded-lg border border-line px-4 py-2.5 text-sm text-muted transition-colors hover:border-accent hover:text-text disabled:opacity-50">Seed starter universe</button>
+          <button onClick={warmDataset} disabled={warming || count === 0} className="rounded-lg border border-line px-4 py-2.5 text-sm text-muted transition-colors hover:border-accent hover:text-text disabled:opacity-50">{warming ? "Warming…" : "Warm dataset"}</button>
         </div>
+        {lastJob && (
+          <div className="mt-3 rounded-lg border border-line bg-surface-2/40 px-3 py-2 text-xs text-muted">
+            <span className="text-text">{lastJob.label}:</span>{" "}
+            {lastJob.ingested ? `${lastJob.ingested.length} ingested` : `${lastJob.warmed ?? 0} warmed`}
+            {lastJob.failed != null && <> · {Array.isArray(lastJob.failed) ? lastJob.failed.length : lastJob.failed} failed</>}
+            {lastJob.tickers != null && <> · {lastJob.tickers} tickers checked</>}
+          </div>
+        )}
       </Panel>
 
       <Panel title="Filters">

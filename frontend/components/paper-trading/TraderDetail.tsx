@@ -42,6 +42,7 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
   const beat = perf ? perf.alpha >= 0 : true;
   const equity: Pt[] = perf ? perf.equity.map((p, i) => ({ t: i, v: p.equity, d: p.date })) : [];
   const bench: Pt[] = perf ? perf.equity.map((p, i) => ({ t: i, v: p.benchmark_equity, d: p.date })) : [];
+  const drawdown: Pt[] = perf?.drawdown_curve ? perf.drawdown_curve.map((p, i) => ({ t: i, v: p.drawdown * 100, d: p.date })) : [];
 
   return (
     <div style={{ padding: "0 0 32px" }}>
@@ -92,6 +93,28 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
               <Tile label="Cash" value={fmt.usd0(perf.cash_dollars)} />
             </div>
 
+            {perf.risk && (
+              <section>
+                <div className="eyebrow" style={{ marginBottom: 12 }}>Risk dashboard</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 12 }}>
+                  <Tile label="Exposure" value={(perf.risk.gross_exposure * 100).toFixed(0) + "%"} />
+                  <Tile label="Concentration" value={(perf.risk.concentration * 100).toFixed(0) + "%"} />
+                  <Tile label="Turnover" value={perf.risk.turnover.toFixed(2) + "x"} />
+                  <Tile label="HHI" value={perf.risk.herfindahl.toFixed(2)} />
+                </div>
+                {drawdown.length > 1 && (
+                  <div className="card" style={{ padding: "12px 8px 2px", background: "var(--surface-2)", borderRadius: "var(--r-md)" }}>
+                    <AreaChart series={drawdown} color="var(--neg)" height={110} uid={"dd" + account.id} valueFmt={(v) => v.toFixed(1) + "%"} seriesLabel="Drawdown" animate={false} />
+                  </div>
+                )}
+                {perf.attribution?.reconciliation && (
+                  <div className="mono" style={{ marginTop: 8, fontSize: 11.5, color: Math.abs(perf.attribution.reconciliation.difference) <= 0.01 ? "var(--text-3)" : "var(--neg)" }}>
+                    Contributions {fmt.usd0(perf.attribution.reconciliation.contribution_final)} + cash {fmt.usd0(perf.attribution.reconciliation.cash_dollars)} = {fmt.usd0(perf.attribution.reconciliation.current_value)}
+                  </div>
+                )}
+              </section>
+            )}
+
             <section>
               <div className="eyebrow" style={{ marginBottom: 12 }}>Strategy contributions</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -102,7 +125,10 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
                     <div key={c.strategy_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "var(--surface-2)", borderRadius: "var(--r-sm)" }}>
                       <CatDot hue={hue} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
+                          {c.archived && <span style={{ fontSize: 10.5, color: "var(--text-3)", border: "1px solid var(--border)", borderRadius: 999, padding: "2px 7px", flexShrink: 0 }}>Archived</span>}
+                        </div>
                         <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>{c.weight}% · {fmt.usd0(c.dollars)} → {fmt.usd0(c.final)}</div>
                       </div>
                       <div style={{ textAlign: "right" }}>
@@ -129,7 +155,7 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
 
       <div style={{ position: "sticky", bottom: 0, background: "linear-gradient(transparent, var(--surface-1) 22%)", padding: "18px 24px", display: "flex", gap: 10 }}>
         <Btn variant="primary" icon="edit" onClick={() => onEdit(account)} style={{ flex: 1 }}>Edit allocation</Btn>
-        <IconBtn icon="trash" size={42} tone="danger" title="Delete trader" onClick={() => onDelete(account)} />
+        <IconBtn icon="trash" size={42} tone="danger" title="Archive trader" onClick={() => onDelete(account)} />
       </div>
     </div>
   );

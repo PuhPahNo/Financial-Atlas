@@ -38,7 +38,7 @@ function TraderCard({ acc, onOpen, onEdit, onDelete }: { acc: TraderAccount; onO
         </div>
         <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 6, flexShrink: 0, opacity: hover ? 1 : 0, transition: "opacity .15s" }}>
           <IconBtn icon="edit" size={28} title="Edit trader" onClick={() => onEdit(acc)} />
-          <IconBtn icon="trash" size={28} tone="danger" title="Delete trader" onClick={() => onDelete(acc)} />
+          <IconBtn icon="trash" size={28} tone="danger" title="Archive trader" onClick={() => onDelete(acc)} />
         </div>
       </div>
 
@@ -50,7 +50,7 @@ function TraderCard({ acc, onOpen, onEdit, onDelete }: { acc: TraderAccount; onO
       <AllocBar acc={acc} />
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {acc.allocations.map((a, i) => <Chip key={i} hue={(a.category && CAT_HUES[a.category]) || "var(--accent)"}>{a.name} · {a.weight}%</Chip>)}
+        {acc.allocations.map((a, i) => <Chip key={i} hue={(a.category && CAT_HUES[a.category]) || "var(--accent)"} muted={a.archived}>{a.name}{a.archived ? " (archived)" : ""} · {a.weight}%</Chip>)}
         {acc.cash_pct > 0 && <Chip muted>Cash · {acc.cash_pct}%</Chip>}
         {acc.allocations.length === 0 && <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>No strategies assigned yet — edit to allocate capital.</span>}
       </div>

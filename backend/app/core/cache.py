@@ -8,6 +8,8 @@ callers can surface ``meta.stale`` (PRD 04 §5).
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -40,6 +42,50 @@ class CacheResult:
     value: Any
     stale: bool = False
     age_seconds: float | None = None
+    stored_at: float | None = None
+    status: str = "miss"
+
+
+@dataclass(frozen=True)
+class CacheEvent:
+    namespace: str
+    key_hash: str
+    status: str
+    stale: bool
+    age_seconds: float | None
+    stored_at: float | None
+
+
+_trace: ContextVar[list[CacheEvent] | None] = ContextVar("cache_trace", default=None)
+
+
+@contextmanager
+def trace_events():
+    """Collect cache accesses made inside the context.
+
+    This avoids pushing cache metadata through every provider method signature while still allowing
+    composed API responses to summarize cache behavior per section.
+    """
+    events: list[CacheEvent] = []
+    token = _trace.set(events)
+    try:
+        yield events
+    finally:
+        _trace.reset(token)
+
+
+def _emit(namespace: str, key: str, result: CacheResult) -> None:
+    events = _trace.get()
+    if events is None:
+        return
+    events.append(CacheEvent(
+        namespace=namespace,
+        key_hash=hashlib.sha256(key.encode("utf-8")).hexdigest()[:12],
+        status=result.status,
+        stale=result.stale,
+        age_seconds=result.age_seconds,
+        stored_at=result.stored_at,
+    ))
 
 
 def _path_for(namespace: str, key: str) -> Path:
@@ -81,22 +127,55 @@ def get_or_set(namespace: str, key: str, ttl_seconds: int, loader: Callable[[], 
     now = time.time()
     record = _read(path) if settings.cache_enabled else None
     if record is not None and now - record.get("stored_at", 0) <= ttl_seconds:
-        return CacheResult(value=record["value"], stale=False, age_seconds=now - record.get("stored_at", 0))
+        result = CacheResult(
+            value=record["value"],
+            stale=False,
+            age_seconds=now - record.get("stored_at", 0),
+            stored_at=record.get("stored_at"),
+            status="hit",
+        )
+        _emit(namespace, key, result)
+        return result
 
     # Single-flight: only one thread loads a given key; others wait then re-read.
     with _lock_for(f"{namespace}:{key}"):
         now = time.time()
         record = _read(path) if settings.cache_enabled else None
         if record is not None and now - record.get("stored_at", 0) <= ttl_seconds:
-            return CacheResult(value=record["value"], stale=False, age_seconds=now - record.get("stored_at", 0))
+            result = CacheResult(
+                value=record["value"],
+                stale=False,
+                age_seconds=now - record.get("stored_at", 0),
+                stored_at=record.get("stored_at"),
+                status="hit",
+            )
+            _emit(namespace, key, result)
+            return result
 
         try:
             value = loader()
         except Exception:
             if record is not None:  # serve stale rather than fail (PRD 02 §9)
-                return CacheResult(value=record["value"], stale=True, age_seconds=now - record.get("stored_at", 0))
+                result = CacheResult(
+                    value=record["value"],
+                    stale=True,
+                    age_seconds=now - record.get("stored_at", 0),
+                    stored_at=record.get("stored_at"),
+                    status="stale",
+                )
+                _emit(namespace, key, result)
+                return result
             raise
 
+        stored_at = now if settings.cache_enabled else None
         if settings.cache_enabled:
-            _write(path, {"stored_at": now, "value": value})
-        return CacheResult(value=value, stale=False, age_seconds=0.0)
+            _write(path, {"stored_at": stored_at, "value": value})
+        result = CacheResult(
+            value=value,
+            stale=False,
+            age_seconds=0.0 if settings.cache_enabled else None,
+            stored_at=stored_at,
+            status="miss" if settings.cache_enabled else "bypass",
+        )
+        _emit(namespace, key, result)
+        return result

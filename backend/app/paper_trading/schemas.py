@@ -41,6 +41,11 @@ class StrategyUpdate(BaseModel):
     caveats: list[str] | None = None
 
 
+class StrategyValidationRequest(BaseModel):
+    category: Category
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
 class BacktestRequest(BaseModel):
     strategy_id: int | None = None
     strategy: StrategyCreate | None = None
@@ -53,6 +58,21 @@ class BacktestRequest(BaseModel):
     slippage_bps: float = Field(default=5.0, ge=0, le=100)
     use_fixture_data: bool = False
     persist_headline: bool = False  # store a compact equity preview on the strategy
+    assistant_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class ParameterSweepRequest(BaseModel):
+    strategy_id: int
+    parameter: str = Field(min_length=1, max_length=120)
+    values: list[float] = Field(min_length=1, max_length=12)
+    start_date: date
+    end_date: date
+    starting_cash: float = Field(default=100000.0, gt=0)
+    benchmark: str = "SPY"
+    transaction_cost_bps: float = Field(default=5.0, ge=0, le=100)
+    slippage_bps: float = Field(default=5.0, ge=0, le=100)
+    use_fixture_data: bool = False
+    rank_by: Literal["total_return", "sharpe", "max_drawdown", "win_rate", "turnover", "exposure"] = "total_return"
 
 
 class AllocationInput(BaseModel):
@@ -74,6 +94,10 @@ class AccountUpdate(BaseModel):
     bio: str | None = Field(default=None, max_length=300)
     starting_cash: float | None = Field(default=None, gt=0)
     allocations: list[AllocationInput] | None = None
+
+
+class AccountRebalanceRequest(BaseModel):
+    allocations: list[AllocationInput] = Field(default_factory=list)
 
 
 class PortfolioCreate(BaseModel):

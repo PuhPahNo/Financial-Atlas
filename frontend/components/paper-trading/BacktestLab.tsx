@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { paperTradingApi } from "@/lib/paperTradingApi";
+import { useEffect, useMemo, useState } from "react";
+import { ParameterSweep, paperTradingApi } from "@/lib/paperTradingApi";
 import { Btn, Icon, Segmented, TextInput } from "./ptkit";
 import { AreaChart, Donut, ReturnBars, drawdownOf, Pt } from "./ptcharts";
 import { fmt, REGIMES, Model } from "./ptdata";
@@ -11,6 +11,7 @@ interface Result {
   stats: { final: number; totalRet: number; alpha: number; cagr: number; maxDD: number; winRate: number; best: number; worst: number };
   trades: any[]; holdings: { ticker: string; w: number }[]; warnings: string[];
 }
+interface NumericParam { path: string; label: string; value: number }
 
 function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
   return (
@@ -69,6 +70,37 @@ function adapt(data: any, capital: number): Result {
   };
 }
 
+function humanizeParam(path: string) {
+  return path.split(".").map((part) => part.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())).join(" / ");
+}
+
+function numericParams(value: any, prefix = ""): NumericParam[] {
+  if (!value || typeof value !== "object") return [];
+  const out: NumericParam[] = [];
+  for (const [key, raw] of Object.entries(value)) {
+    if (key === "tickers") continue;
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof raw === "number" && Number.isFinite(raw)) out.push({ path, label: humanizeParam(path), value: raw });
+    else if (raw && typeof raw === "object" && !Array.isArray(raw)) out.push(...numericParams(raw, path));
+  }
+  return out;
+}
+
+function defaultSweepValues(current: number | undefined): string {
+  const base = typeof current === "number" && Number.isFinite(current) ? current : 1;
+  const spread = Math.max(Math.abs(base) * 0.25, base === 0 ? 1 : 0.01);
+  const vals = [base - spread, base, base + spread].map((v) => Number(v.toFixed(Math.abs(v) < 1 ? 4 : 2)));
+  return vals.join(", ");
+}
+
+function pctMetric(value: any): string {
+  return typeof value === "number" ? fmt.pct(value * 100) : "—";
+}
+
+function plainMetric(value: any, digits = 2): string {
+  return typeof value === "number" ? value.toFixed(digits) : "—";
+}
+
 export default function BacktestLab({ models, preselectId, initialRegime }: { models: Model[]; preselectId?: number | null; initialRegime?: string }) {
   const [stratId, setStratId] = useState<number>(preselectId || models[0]?.id);
   const [regimeId, setRegimeId] = useState(initialRegime || "gfc");
@@ -76,9 +108,23 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
   const [result, setResult] = useState<Result | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sweepParam, setSweepParam] = useState("");
+  const [sweepValues, setSweepValues] = useState("");
+  const [sweep, setSweep] = useState<ParameterSweep | null>(null);
+  const [sweepRunning, setSweepRunning] = useState(false);
+  const [sweepError, setSweepError] = useState<string | null>(null);
 
   const model = models.find((m) => m.id === stratId) || models[0];
   const regime = REGIMES.find((r) => r.id === regimeId)!;
+  const sweepOptions = useMemo(() => numericParams(model?.parameters ?? {}), [model?.id, model?.parameters]);
+
+  useEffect(() => {
+    const first = sweepOptions[0];
+    setSweep(null);
+    setSweepError(null);
+    setSweepParam(first?.path ?? "");
+    setSweepValues(defaultSweepValues(first?.value));
+  }, [model?.id, sweepOptions]);
 
   async function run() {
     if (!model) return;
@@ -92,6 +138,29 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
     } catch (e: any) {
       setError(e.message || "Backtest failed.");
     } finally { setRunning(false); }
+  }
+  async function runSweep() {
+    if (!model || !sweepParam) return;
+    const values = sweepValues.split(",").map((value) => Number(value.trim())).filter((value) => Number.isFinite(value));
+    if (!values.length) {
+      setSweepError("Enter at least one numeric sweep value.");
+      return;
+    }
+    setSweepRunning(true); setSweep(null); setSweepError(null);
+    try {
+      const res = await paperTradingApi.runSweep({
+        strategy_id: model.id,
+        parameter: sweepParam,
+        values,
+        start_date: regime.start,
+        end_date: regime.end,
+        starting_cash: capital,
+        benchmark: "SPY",
+      });
+      setSweep(res.data.sweep);
+    } catch (e: any) {
+      setSweepError(e.message || "Sweep failed.");
+    } finally { setSweepRunning(false); }
   }
   // run when the chosen strategy/regime changes (and on mount)
   useEffect(() => { run(); /* eslint-disable-next-line */ }, [stratId, regimeId]);
@@ -119,6 +188,53 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
           <Segmented options={REGIMES.map((r) => ({ id: r.id, label: r.label }))} value={regimeId} onChange={setRegimeId} size="sm" />
         </div>
         <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{regime.sub} · {regime.start} → {regime.end}</span>
+      </div>
+
+      <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+          <div style={{ flex: "1 1 240px" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Parameter sweep</div>
+            <Select value={sweepParam} onChange={(v) => {
+              setSweepParam(v);
+              setSweepValues(defaultSweepValues(sweepOptions.find((option) => option.path === v)?.value));
+            }} options={sweepOptions.map((option) => ({ value: option.path, label: option.label }))} />
+          </div>
+          <div style={{ flex: "1 1 220px" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Values</div>
+            <TextInput mono value={sweepValues} onChange={setSweepValues} placeholder="0.05, 0.10, 0.15" />
+          </div>
+          <Btn variant="soft" icon="layers" onClick={runSweep} disabled={!sweepParam || sweepRunning} style={{ minWidth: 128 }}>
+            {sweepRunning ? "Sweeping..." : "Run sweep"}</Btn>
+        </div>
+        {sweepOptions.length === 0 && <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>No numeric parameters found for this model.</div>}
+        {sweepError && <div style={{ fontSize: 12.5, color: "var(--neg)" }}>{sweepError}</div>}
+        {sweep && (
+          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--r-sm)" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 720 }}>
+              <thead>
+                <tr style={{ background: "var(--surface-2)" }}>
+                  {["Rank", "Value", "Return", "Sharpe", "Max DD", "Win", "Turnover", "Exposure"].map((h) => (
+                    <th key={h} style={{ textAlign: h === "Value" ? "left" : "right", padding: "10px 12px", fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sweep.runs.map((row) => (
+                  <tr key={row.run_id} style={{ borderTop: "1px solid var(--border)" }}>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "right", color: "var(--accent-2)", fontWeight: 700 }}>{row.rank}</td>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "left", color: "var(--text-1)" }}>{row.value}</td>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "right", color: (row.metrics.total_return ?? 0) >= 0 ? "var(--pos)" : "var(--neg)" }}>{pctMetric(row.metrics.total_return)}</td>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "right" }}>{plainMetric(row.metrics.sharpe)}</td>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "right", color: "var(--neg)" }}>{pctMetric(row.metrics.max_drawdown)}</td>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "right" }}>{pctMetric(row.metrics.win_rate)}</td>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "right" }}>{plainMetric(row.metrics.turnover)}x</td>
+                    <td className="mono" style={{ padding: "10px 12px", textAlign: "right" }}>{pctMetric(row.metrics.exposure)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {model?.isRule && model.methodology && (

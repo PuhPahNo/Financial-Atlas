@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 
 from ..providers.base import Period
 from ..providers.registry import sec_edgar
-from ..services import company, financials, prices
+from ..services import company, financials, prices, snapshot
 from ..services import ownership as ownership_service
 from ..services import filings as filings_service
 from ..services import screener as screener_service
@@ -19,8 +19,21 @@ from ..services import research as research_service
 router = APIRouter(prefix="/api/v1")
 
 
-def envelope(data: Any, *, ticker: str | None = None, served_by: str | None = None, stale: bool = False) -> dict:
-    return {"data": data, "meta": {"ticker": ticker, "served_by": served_by, "stale": stale}}
+def envelope(
+    data: Any,
+    *,
+    ticker: str | None = None,
+    served_by: str | None = None,
+    stale: bool = False,
+    as_of: str | None = None,
+    warnings: list[dict] | None = None,
+) -> dict:
+    meta = {"ticker": ticker, "served_by": served_by, "stale": stale}
+    if as_of is not None:
+        meta["as_of"] = as_of
+    if warnings:
+        meta["warnings"] = warnings
+    return {"data": data, "meta": meta}
 
 
 def _period(value: str) -> Period:
@@ -36,6 +49,21 @@ def search(q: str = Query(..., min_length=1)):
 def company_overview(ticker: str):
     result = company.overview(ticker)
     return envelope(result, ticker=ticker.upper(), served_by=result.get("served_by"))
+
+
+@router.get("/company/{ticker}/snapshot")
+def company_snapshot(ticker: str, period: str = "annual", range: str = "1y", interval: str = "1d"):
+    result = snapshot.overview_snapshot(ticker, period=_period(period), price_range=range, interval=interval)
+    served_by = result.get("sections", {}).get("company", {}).get("served_by")
+    stale = any(section.get("stale") for section in result.get("sections", {}).values())
+    return envelope(
+        result,
+        ticker=ticker.upper(),
+        served_by=served_by,
+        stale=stale,
+        as_of=result.get("as_of"),
+        warnings=result.get("warnings"),
+    )
 
 
 @router.get("/prices/{ticker}")
@@ -65,7 +93,7 @@ def cash_flow(ticker: str, period: str = "annual"):
 @router.get("/financials/{ticker}/cash-flow-analysis")
 def cash_flow_analysis(ticker: str, period: str = "annual"):
     result = financials.cash_flow_analysis(ticker, _period(period))
-    return envelope({"periods": result["periods"], "currency": "USD"},
+    return envelope({"periods": result["periods"], "scorecard": result["scorecard"], "currency": "USD"},
                     ticker=ticker.upper(), served_by=result["served_by"])
 
 
@@ -120,18 +148,29 @@ def market_best_picks(limit: int = 8):
 @router.get("/news/{ticker}")
 def news(ticker: str):
     r = research_service.news(ticker)
-    return envelope({"articles": r["articles"], "available": r["available"]}, ticker=ticker.upper(), served_by=r["served_by"])
+    return envelope(
+        {"articles": r["articles"], "available": r["available"], "warnings": r.get("warnings", [])},
+        ticker=ticker.upper(),
+        served_by=r["served_by"],
+        warnings=r.get("warnings"),
+    )
 
 
 @router.get("/analyst/{ticker}")
 def analyst(ticker: str):
-    return envelope(research_service.analyst(ticker), ticker=ticker.upper())
+    result = research_service.analyst(ticker)
+    return envelope(result, ticker=ticker.upper(), warnings=result.get("warnings"))
 
 
 @router.get("/peers/{ticker}")
 def peers(ticker: str):
     r = research_service.peers(ticker)
-    return envelope({"peers": r["peers"]}, ticker=ticker.upper(), served_by=r["served_by"])
+    return envelope(
+        {"peers": r["peers"], "warnings": r.get("warnings", [])},
+        ticker=ticker.upper(),
+        served_by=r["served_by"],
+        warnings=r.get("warnings"),
+    )
 
 
 @router.get("/compare")
@@ -143,14 +182,23 @@ def compare(tickers: str = Query(...)):
 @router.get("/valuation/{ticker}")
 def valuation(ticker: str):
     from ..valuation import service as valuation_service
-    return envelope(valuation_service.valuate(ticker), ticker=ticker.upper(), served_by="derived")
+    result = valuation_service.valuate(ticker)
+    valuation_service.record_result(ticker, result)
+    return envelope(result, ticker=ticker.upper(), served_by="derived")
 
 
 @router.post("/valuation/{ticker}")
 def valuation_custom(ticker: str, body: dict = Body(default_factory=dict)):
     from ..valuation import service as valuation_service
     result = valuation_service.valuate(ticker, assumptions=body.get("assumptions"), weights=body.get("weights"))
+    valuation_service.record_result(ticker, result, weights=body.get("weights"))
     return envelope(result, ticker=ticker.upper(), served_by="derived")
+
+
+@router.get("/valuation/{ticker}/history")
+def valuation_history(ticker: str, limit: int = 20):
+    from ..valuation import service as valuation_service
+    return envelope(valuation_service.valuation_history(ticker, limit=limit), ticker=ticker.upper(), served_by="local")
 
 
 # --- Screener -------------------------------------------------------------
@@ -163,6 +211,20 @@ def screener_universe():
 def screener_ingest(body: dict = Body(default_factory=dict)):
     tickers = body.get("tickers") or []
     return envelope(screener_service.ingest(tickers))
+
+
+@router.post("/screener/seed")
+def screener_seed(body: dict = Body(default_factory=dict)):
+    tickers = body.get("tickers")
+    return envelope(screener_service.seed_universe(tickers))
+
+
+@router.post("/screener/warm")
+def screener_warm(body: dict = Body(default_factory=dict)):
+    return envelope(screener_service.warm_universe(
+        tickers=body.get("tickers"),
+        include_default=bool(body.get("include_default", False)),
+    ))
 
 
 @router.post("/screener")

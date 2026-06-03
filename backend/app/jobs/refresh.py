@@ -9,27 +9,36 @@ from __future__ import annotations
 
 import logging
 
-from ..db import CompanySnapshot, init_db, session_scope
+from ..db import init_db
 from ..services import screener
 
 log = logging.getLogger("jobs.refresh")
 
 
-def run() -> dict:
+def run(*, include_default: bool = False) -> dict:
     init_db()
-    with session_scope() as s:
-        tickers = [r[0] for r in s.query(CompanySnapshot.ticker).all()]
+    tickers = screener.tracked_tickers(include_default=include_default)
 
-    refreshed, failed = 0, 0
+    refreshed, failed, skipped = 0, 0, 0
+    details = []
     for ticker in tickers:
-        try:
-            screener.build_snapshot(ticker)
+        detail = screener.warm_ticker(ticker)
+        details.append(detail)
+        if detail["status"] == "ok":
             refreshed += 1
-        except Exception as exc:  # noqa: BLE001 - never let one ticker abort the run
+        elif detail["domains"]:
             failed += 1
-            log.warning("refresh failed for %s: %s", ticker, exc)
+            log.warning("refresh failed for %s: %s", ticker, detail["domains"])
+        else:
+            skipped += 1
 
-    result = {"tickers": len(tickers), "refreshed": refreshed, "failed": failed}
+    result = {
+        "tickers": len(tickers),
+        "refreshed": refreshed,
+        "failed": failed,
+        "skipped": skipped,
+        "details": details,
+    }
     log.info("refresh complete: %s", result)
     return result
 

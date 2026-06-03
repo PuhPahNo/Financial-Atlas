@@ -6,6 +6,22 @@ import { Btn, Icon, IconBtn } from "./ptkit";
 
 interface Msg { id: number; role: string; content: string; tool_calls?: any[] }
 interface Pending { id: number; action: string; payload: any; status: string }
+interface ActionStatus { id: number; action: string; status: string; summary?: string; details?: string; result_ref?: any }
+
+function pendingSummary(action: Pending) {
+  const payload = action.payload ?? {};
+  if (payload.action_summary) return payload.action_summary;
+  if (payload.name) return `“${payload.name}”`;
+  return action.action.replaceAll("_", " ");
+}
+
+function pendingDetail(action: Pending) {
+  const payload = action.payload ?? {};
+  if (payload.action_details) return payload.action_details;
+  if (payload.category) return String(payload.category).replaceAll("_", " ");
+  if (payload.strategy_name && payload.account_name) return `${payload.strategy_name} → ${payload.account_name}`;
+  return "Review this local paper-trading change before it is saved.";
+}
 
 const SUGGESTIONS = [
   "When the S&P 500 hits a new all-time high, buy SQQQ; take profit 10%, stop loss 3%",
@@ -19,12 +35,16 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
+  const [actions, setActions] = useState<ActionStatus[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    paperTradingApi.createAssistantSession().then((res) => setSessionId(res.data.session.id)).catch(() => {});
+    paperTradingApi.createAssistantSession().then((res) => {
+      setSessionId(res.data.session.id);
+      setActions(res.data.actions ?? []);
+    }).catch(() => {});
   }, []);
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" }); }, [messages, pending, busy]);
 
@@ -37,15 +57,16 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
       const res = await paperTradingApi.sendAssistantMessage(sessionId, text);
       setMessages(res.data.messages);
       setPending(res.data.pending_actions ?? []);
+      setActions(res.data.actions ?? []);
     } catch { /* ignore */ } finally { setBusy(false); }
   }
   async function confirm(id: number) {
     const res = await paperTradingApi.confirmAssistantAction(id);
-    setMessages(res.data.messages); setPending(res.data.pending_actions ?? []); onChanged?.();
+    setMessages(res.data.messages); setPending(res.data.pending_actions ?? []); setActions(res.data.actions ?? []); onChanged?.();
   }
   async function reject(id: number) {
     const res = await paperTradingApi.rejectAssistantAction(id);
-    setMessages(res.data.messages); setPending(res.data.pending_actions ?? []);
+    setMessages(res.data.messages); setPending(res.data.pending_actions ?? []); setActions(res.data.actions ?? []);
   }
 
   return (
@@ -85,13 +106,30 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, color: "var(--accent-2)", fontWeight: 600, fontSize: 13 }}>
               <Icon name="sparkles" size={15} fill /> Confirm action: <span className="mono">{p.action}</span>
             </div>
-            <div className="mono" style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 12, wordBreak: "break-word" }}>{p.payload?.name ? `“${p.payload.name}” · ${p.payload.category ?? ""}` : JSON.stringify(p.payload).slice(0, 160)}</div>
+            <div style={{ fontSize: 14, color: "var(--text-1)", fontWeight: 600, marginBottom: 4 }}>{pendingSummary(p)}</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-2)", marginBottom: 12, lineHeight: 1.45 }}>{pendingDetail(p)}</div>
             <div style={{ display: "flex", gap: 10 }}>
               <Btn variant="primary" size="sm" icon="play" onClick={() => confirm(p.id)}>Confirm</Btn>
               <Btn variant="soft" size="sm" icon="x" onClick={() => reject(p.id)}>Reject</Btn>
             </div>
           </div>
         ))}
+        {actions.length > 0 && (
+          <div style={{ alignSelf: "stretch", borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 2 }}>
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0, color: "var(--text-3)", marginBottom: 8 }}>Action status</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {actions.slice(-4).map((action) => (
+                <div key={action.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, alignItems: "start", padding: "9px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface-2)" }}>
+                  <span className="mono" style={{ fontSize: 10.5, color: action.status === "confirmed" ? "var(--pos)" : action.status === "rejected" ? "var(--neg)" : "var(--accent-2)", textTransform: "uppercase" }}>{action.status}</span>
+                  <div>
+                    <div style={{ fontSize: 12.5, color: "var(--text-1)", fontWeight: 600 }}>{action.summary || action.action.replaceAll("_", " ")}</div>
+                    {action.result_ref?.name && <div style={{ fontSize: 11.5, color: "var(--text-2)", marginTop: 2 }}>{action.result_ref.name}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {busy && (
           <div style={{ display: "flex", gap: 5, padding: "12px 16px", alignSelf: "flex-start" }}>
             {[0, 1, 2].map((i) => <span key={i} style={{ width: 7, height: 7, borderRadius: 999, background: "var(--text-3)", animation: "pt-fadeIn 1s ease infinite alternate", animationDelay: `${i * 0.15}s` }} />)}

@@ -7,6 +7,8 @@ assumptions from the POST endpoint override the defaults.
 """
 from __future__ import annotations
 
+from ..db import session_scope
+from ..models.valuation import ValuationResult
 from ..providers.base import Period
 from ..providers.registry import run_chain
 from ..services import prices
@@ -102,6 +104,161 @@ def _run_models(inp: dict, a: dict) -> list[dict]:
     ]
 
 
+def _blend_value(inp: dict, assumptions: dict, weights: dict) -> float | None:
+    try:
+        return engine.blended(_run_models(inp, assumptions), weights)["blended_fair_value"]
+    except Exception:
+        return None
+
+
+def _growth_case(base: dict, growth: float) -> dict:
+    a = dict(base)
+    ratio = (base.get("growth_6_10") or 0) / base["growth_1_5"] if base.get("growth_1_5") else 0.5
+    a["growth_1_5"] = growth
+    a["growth_6_10"] = growth * ratio
+    a["eps_growth"] = growth
+    return a
+
+
+def _grid(label: str, row_label: str, column_label: str, rows: list[tuple[str, float]], columns: list[tuple[str, float]], values: list[list[float | None]]) -> dict:
+    return {
+        "label": label,
+        "row_label": row_label,
+        "column_label": column_label,
+        "rows": [{"label": label, "value": value} for label, value in rows],
+        "columns": [{"label": label, "value": value} for label, value in columns],
+        "values": values,
+    }
+
+
+def sensitivity_grids(inp: dict, base_assumptions: dict, weights: dict) -> dict:
+    """Deterministic valuation sensitivities using the same model/blend path as the main result."""
+    d0 = base_assumptions["discount_rate"]
+    g0 = base_assumptions["growth_1_5"]
+    t0 = base_assumptions["terminal_growth"]
+
+    discount_rows = [
+        (f"{(d0 + 0.02) * 100:.1f}%", d0 + 0.02),
+        (f"{d0 * 100:.1f}%", d0),
+        (f"{max(t0 + 0.005, d0 - 0.02) * 100:.1f}%", max(t0 + 0.005, d0 - 0.02)),
+    ]
+    growth_columns = [
+        (f"{max(0.0, g0 * 0.5) * 100:.1f}%", max(0.0, g0 * 0.5)),
+        (f"{g0 * 100:.1f}%", g0),
+        (f"{max(0.0, g0 * 1.5) * 100:.1f}%", max(0.0, g0 * 1.5)),
+    ]
+    discount_growth_values = []
+    for _, discount_rate in discount_rows:
+        row = []
+        for _, growth in growth_columns:
+            a = _growth_case(base_assumptions, growth)
+            a["discount_rate"] = discount_rate
+            if a["discount_rate"] <= a["terminal_growth"]:
+                row.append(None)
+            else:
+                row.append(_blend_value(inp, a, weights))
+        discount_growth_values.append(row)
+
+    terminal_columns = [
+        (f"{max(0.0, t0 - 0.005) * 100:.1f}%", max(0.0, t0 - 0.005)),
+        (f"{t0 * 100:.1f}%", t0),
+        (f"{min(t0 + 0.005, d0 - 0.005) * 100:.1f}%", min(t0 + 0.005, d0 - 0.005)),
+    ]
+    terminal_values = []
+    for _, discount_rate in discount_rows:
+        row = []
+        for _, terminal_growth in terminal_columns:
+            a = dict(base_assumptions)
+            a["discount_rate"] = discount_rate
+            a["terminal_growth"] = terminal_growth
+            if a["discount_rate"] <= a["terminal_growth"]:
+                row.append(None)
+            else:
+                row.append(_blend_value(inp, a, weights))
+        terminal_values.append(row)
+
+    multiple_rows = [("0.85x", 0.85), ("1.00x", 1.0), ("1.15x", 1.15)]
+    multiple_columns = [("P/E", "fair_pe"), ("EV/EBITDA", "fair_ev_ebitda"), ("EV/Sales", "fair_ev_sales")]
+    multiple_values = []
+    for _, mult in multiple_rows:
+        row = []
+        for _, key in multiple_columns:
+            a = dict(base_assumptions)
+            a[key] = base_assumptions[key] * mult
+            row.append(_blend_value(inp, a, weights))
+        multiple_values.append(row)
+
+    return {
+        "discount_growth": _grid(
+            "Discount rate x FCF growth",
+            "Discount rate",
+            "FCF growth",
+            discount_rows,
+            growth_columns,
+            discount_growth_values,
+        ),
+        "discount_terminal": _grid(
+            "Discount rate x terminal growth",
+            "Discount rate",
+            "Terminal growth",
+            discount_rows,
+            terminal_columns,
+            terminal_values,
+        ),
+        "multiples": {
+            "label": "Key multiple stress",
+            "row_label": "Multiple scale",
+            "column_label": "Changed multiple",
+            "rows": [{"label": label, "value": value} for label, value in multiple_rows],
+            "columns": [{"label": label, "value": key} for label, key in multiple_columns],
+            "values": multiple_values,
+        },
+    }
+
+
+def valuation_diagnostics(models: list[dict], requested_weights: dict, applied_weights: dict, blended_fair_value: float | None) -> dict:
+    rows = []
+    for model in models:
+        model_id = model["model"]
+        fair_value = model.get("fair_value_per_share")
+        raw_weight = requested_weights.get(model_id, 0.0)
+        applied_weight = applied_weights.get(model_id, 0.0)
+        applicable = bool(model.get("applicable") and fair_value is not None and fair_value > 0)
+        if applicable and applied_weight <= 0:
+            reason = "weight is zero"
+        else:
+            reason = model.get("reason")
+        rows.append({
+            "model": model_id,
+            "applicable": applicable,
+            "reason": reason,
+            "fair_value_per_share": fair_value,
+            "requested_weight": raw_weight,
+            "applied_weight": applied_weight,
+            "contribution": fair_value * applied_weight if fair_value is not None and applied_weight else 0.0,
+            "included_in_blend": applied_weight > 0,
+        })
+
+    included_values = [row["fair_value_per_share"] for row in rows if row["included_in_blend"] and row["fair_value_per_share"] is not None]
+    requested_active_sum = sum(row["requested_weight"] for row in rows if row["applicable"] and row["requested_weight"] > 0)
+    return {
+        "models": rows,
+        "blend": {
+            "applicable_count": sum(1 for row in rows if row["applicable"]),
+            "excluded_count": sum(1 for row in rows if not row["applicable"]),
+            "requested_active_weight": requested_active_sum,
+            "renormalized": bool(rows) and abs(requested_active_sum - 1.0) > 1e-6,
+            "min_component": min(included_values) if included_values else None,
+            "max_component": max(included_values) if included_values else None,
+            "blended_within_range": (
+                blended_fair_value is not None
+                and bool(included_values)
+                and min(included_values) <= blended_fair_value <= max(included_values)
+            ),
+        },
+    }
+
+
 def _apply_scenario(base: dict, s: dict) -> dict:
     a = dict(base)
     a["growth_1_5"] = base["growth_1_5"] * s["growth_mult"]
@@ -134,6 +291,7 @@ def valuate(ticker: str, *, assumptions: dict | None = None, weights: dict | Non
             "models": [], "blended_fair_value": None, "applied_weights": {},
             "scenarios": {"bear": None, "base": None, "bull": None},
             "margin_of_safety": None, "assumptions": {}, "inputs": {},
+            "diagnostics": {"models": [], "blend": {}, "sensitivity": {}, "history_available": True},
             "note": "Valuation isn't supported for foreign private issuers (ADRs): EDGAR reports ordinary-share counts and per-ordinary-share figures, which aren't directly comparable to the per-ADS trading price. Financial statements are still available.",
         }
 
@@ -160,6 +318,10 @@ def valuate(ticker: str, *, assumptions: dict | None = None, weights: dict | Non
             base_models = models
             base_blend = blend
 
+    diagnostics = valuation_diagnostics(base_models, w, base_blend["applied_weights"], base_blend["blended_fair_value"])
+    diagnostics["sensitivity"] = sensitivity_grids(inp, base_assumptions, w)
+    diagnostics["history_available"] = True
+
     return {
         "ticker": ticker.upper(),
         "current_price": current_price,
@@ -170,4 +332,73 @@ def valuate(ticker: str, *, assumptions: dict | None = None, weights: dict | Non
         "margin_of_safety": engine.margin_of_safety(base_blend["blended_fair_value"], current_price),
         "assumptions": base_assumptions,
         "inputs": inp,
+        "diagnostics": diagnostics,
+    }
+
+
+def record_result(ticker: str, result: dict, *, weights: dict | None = None) -> dict | None:
+    if result.get("blended_fair_value") is None:
+        return None
+    stored_weights = weights or result.get("applied_weights") or {}
+    with session_scope() as session:
+        latest = (
+            session.query(ValuationResult)
+            .filter(ValuationResult.ticker == ticker.upper())
+            .order_by(ValuationResult.valuation_date.desc(), ValuationResult.id.desc())
+            .first()
+        )
+        if latest is not None and _same_result(latest, result, stored_weights):
+            return _history_row(latest)
+        row = ValuationResult(
+            ticker=ticker.upper(),
+            current_price=result.get("current_price"),
+            blended_fair_value=result.get("blended_fair_value"),
+            margin_of_safety=result.get("margin_of_safety"),
+            assumptions_json=result.get("assumptions") or {},
+            weights_json=stored_weights,
+            result_json=result,
+        )
+        session.add(row)
+        session.flush()
+        return _history_row(row)
+
+
+def _same_number(a, b) -> bool:
+    if a is None or b is None:
+        return a is b
+    return abs(a - b) < 1e-9
+
+
+def _same_result(row: ValuationResult, result: dict, weights: dict) -> bool:
+    return (
+        _same_number(row.current_price, result.get("current_price"))
+        and _same_number(row.blended_fair_value, result.get("blended_fair_value"))
+        and _same_number(row.margin_of_safety, result.get("margin_of_safety"))
+        and (row.assumptions_json or {}) == (result.get("assumptions") or {})
+        and (row.weights_json or {}) == weights
+    )
+
+
+def valuation_history(ticker: str, *, limit: int = 20) -> dict:
+    with session_scope() as session:
+        rows = (
+            session.query(ValuationResult)
+            .filter(ValuationResult.ticker == ticker.upper())
+            .order_by(ValuationResult.valuation_date.desc(), ValuationResult.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return {"results": [_history_row(row) for row in rows]}
+
+
+def _history_row(row: ValuationResult) -> dict:
+    return {
+        "id": row.id,
+        "ticker": row.ticker,
+        "valuation_date": row.valuation_date.isoformat() if row.valuation_date else None,
+        "current_price": row.current_price,
+        "blended_fair_value": row.blended_fair_value,
+        "margin_of_safety": row.margin_of_safety,
+        "assumptions": row.assumptions_json or {},
+        "weights": row.weights_json or {},
     }
