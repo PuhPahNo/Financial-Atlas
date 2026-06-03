@@ -1,7 +1,6 @@
 FROM node:22-bookworm-slim
 
-ENV NODE_ENV=production \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}"
 
@@ -26,6 +25,8 @@ COPY scripts scripts
 RUN cd frontend && npm run build \
     && npm prune --omit=dev \
     && chmod +x /app/scripts/render-start.sh
+
+ENV NODE_ENV=production
 
 EXPOSE 10000
 
