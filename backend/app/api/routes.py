@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import HTMLResponse
 
+from ..core.deps import require_edit_access
 from ..providers.base import Period
 from ..providers.registry import sec_edgar
 from ..services import company, financials, prices, snapshot
@@ -187,7 +188,7 @@ def valuation(ticker: str):
     return envelope(result, ticker=ticker.upper(), served_by="derived")
 
 
-@router.post("/valuation/{ticker}")
+@router.post("/valuation/{ticker}", dependencies=[Depends(require_edit_access)])
 def valuation_custom(ticker: str, body: dict = Body(default_factory=dict)):
     from ..valuation import service as valuation_service
     result = valuation_service.valuate(ticker, assumptions=body.get("assumptions"), weights=body.get("weights"))
@@ -207,19 +208,19 @@ def screener_universe():
     return envelope(screener_service.universe())
 
 
-@router.post("/screener/ingest")
+@router.post("/screener/ingest", dependencies=[Depends(require_edit_access)])
 def screener_ingest(body: dict = Body(default_factory=dict)):
     tickers = body.get("tickers") or []
     return envelope(screener_service.ingest(tickers))
 
 
-@router.post("/screener/seed")
+@router.post("/screener/seed", dependencies=[Depends(require_edit_access)])
 def screener_seed(body: dict = Body(default_factory=dict)):
     tickers = body.get("tickers")
     return envelope(screener_service.seed_universe(tickers))
 
 
-@router.post("/screener/warm")
+@router.post("/screener/warm", dependencies=[Depends(require_edit_access)])
 def screener_warm(body: dict = Body(default_factory=dict)):
     return envelope(screener_service.warm_universe(
         tickers=body.get("tickers"),
@@ -233,26 +234,26 @@ def screener_run(body: dict = Body(default_factory=dict)):
 
 
 # --- Watchlists -----------------------------------------------------------
-@router.get("/watchlists")
+@router.get("/watchlists", dependencies=[Depends(require_edit_access)])
 def watchlists_list():
     return envelope(watchlist_service.list_watchlists())
 
 
-@router.post("/watchlists")
+@router.post("/watchlists", dependencies=[Depends(require_edit_access)])
 def watchlists_create(body: dict = Body(default_factory=dict)):
     return envelope(watchlist_service.create_watchlist(body.get("name", "")))
 
 
-@router.delete("/watchlists/{watchlist_id}")
+@router.delete("/watchlists/{watchlist_id}", dependencies=[Depends(require_edit_access)])
 def watchlists_delete(watchlist_id: int):
     return envelope(watchlist_service.delete_watchlist(watchlist_id))
 
 
-@router.post("/watchlists/{watchlist_id}/items")
+@router.post("/watchlists/{watchlist_id}/items", dependencies=[Depends(require_edit_access)])
 def watchlist_add_item(watchlist_id: int, body: dict = Body(default_factory=dict)):
     return envelope(watchlist_service.add_item(watchlist_id, body.get("ticker", "")))
 
 
-@router.delete("/watchlists/{watchlist_id}/items/{ticker}")
+@router.delete("/watchlists/{watchlist_id}/items/{ticker}", dependencies=[Depends(require_edit_access)])
 def watchlist_remove_item(watchlist_id: int, ticker: str):
     return envelope(watchlist_service.remove_item(watchlist_id, ticker))

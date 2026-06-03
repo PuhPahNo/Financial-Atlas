@@ -28,6 +28,11 @@ class NotFoundError(AtlasError):
     http_status = 404
 
 
+class UnauthorizedError(AtlasError):
+    code = "UNAUTHORIZED"
+    http_status = 401
+
+
 class RateLimitError(AtlasError):
     code = "RATE_LIMITED"
     http_status = 429

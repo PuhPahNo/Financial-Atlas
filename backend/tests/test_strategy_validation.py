@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from auth_helpers import authenticate
 
-client = TestClient(app)
+client = authenticate(TestClient(app))
 
 
 def _rule(

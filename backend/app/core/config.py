@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     fred_api_key: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-5.5"
+    auth_required: bool = True
+    auth_username: str = "admin"
+    auth_password: str = "admin123"
+    auth_secret: str = "dev-atlas-auth-secret-change-me"
+    auth_cookie_name: str = "atlas_session"
+    auth_session_ttl_seconds: int = 7 * 24 * 60 * 60
+    paper_trading_rate_limit_per_minute: int = 240
+    assistant_rate_limit_per_minute: int = 20
+    auth_rate_limit_per_minute: int = 12
     # Reserved for the future paper-trading / backtesting phase (Alpaca).
     alpaca_api_key: str = ""
     alpaca_secret: str = ""

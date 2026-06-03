@@ -4,8 +4,9 @@ from app.db import CompanySnapshot, Watchlist, WatchlistItem, session_scope
 from app.jobs import refresh
 from app.main import app
 from app.services import screener
+from auth_helpers import authenticate
 
-client = TestClient(app)
+client = authenticate(TestClient(app))
 
 
 def test_tracked_tickers_include_snapshots_watchlists_and_extras_without_duplicates():

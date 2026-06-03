@@ -1,5 +1,6 @@
 import pytest
 
+from app.core.rate_limit import reset_rate_limits
 from app.db import session_scope
 from app.db import CompanySnapshot, Watchlist, WatchlistItem
 from app.models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
@@ -9,6 +10,7 @@ from app.models.valuation import ValuationResult
 
 @pytest.fixture(autouse=True)
 def cleanup_feature_test_records():
+    reset_rate_limits()
     yield
     with session_scope() as session:
         for portfolio in session.query(PaperPortfolio).filter(PaperPortfolio.name.in_(["Fixture Portfolio", "Runnable Portfolio"])).all():
@@ -83,6 +85,8 @@ def cleanup_feature_test_records():
                 "Test Orchestration Chat",
                 "Test Orchestration Reject Chat",
                 "Test Orchestration Retry Chat",
+                "Rate Limit 1",
+                "Rate Limit 2",
                 "Strategy chat",
             ])
         ).all()

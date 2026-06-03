@@ -31,6 +31,18 @@ services:
         value: info
       - key: SEC_USER_AGENT
         sync: false        # set in dashboard (your contact email — SEC requires it)
+      - key: AUTH_USERNAME
+        value: admin
+      - key: AUTH_PASSWORD
+        value: admin123
+      - key: AUTH_SECRET
+        sync: false        # set the same value on API + web before public launch
+      - key: ASSISTANT_RATE_LIMIT_PER_MINUTE
+        value: 20
+      - key: PAPER_TRADING_RATE_LIMIT_PER_MINUTE
+        value: 240
+      - key: AUTH_RATE_LIMIT_PER_MINUTE
+        value: 12
 
   # --- Next.js frontend ----------------------------------------------------
   - type: web
@@ -46,6 +58,14 @@ services:
           name: financial-atlas-api
           type: web
           property: host   # bare hostname; next.config.mjs prepends https:// for the /api rewrite
+      - key: AUTH_USERNAME
+        value: admin
+      - key: AUTH_PASSWORD
+        value: admin123
+      - key: AUTH_SECRET
+        sync: false        # set the same value on API + web before public launch
+      - key: AUTH_RATE_LIMIT_PER_MINUTE
+        value: 12
 
   # --- Daily snapshot refresh ---------------------------------------------
   - type: cron

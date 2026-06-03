@@ -2,8 +2,9 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.valuation import service as valuation_service
+from auth_helpers import authenticate
 
-client = TestClient(app)
+client = authenticate(TestClient(app))
 
 
 def test_valuation_route_records_retrievable_history(monkeypatch):

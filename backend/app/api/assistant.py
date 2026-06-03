@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..assistant import service
 from ..assistant.schemas import MessageCreate, SessionCreate
+from ..core.deps import require_assistant_access
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_assistant_access)])
 
 
 def envelope(data: Any) -> dict:

@@ -2,8 +2,9 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.paper_trading import accounts as account_service
+from auth_helpers import authenticate
 
-client = TestClient(app)
+client = authenticate(TestClient(app))
 
 
 def test_seeded_categories_include_models():
