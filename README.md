@@ -21,8 +21,8 @@ entirely on **free public data** (SEC EDGAR + Yahoo Finance), with **no API keys
 - **Screener** — multi-criteria filters (FCF margin, P/E, MoS, …) over the locally-ingested dataset.
 - **Watchlists** — track tickers with live price vs blended fair value, upside, and margin of safety.
 
-Deployment to **Render** is wired as a Blueprint ([infra/render.yaml](infra/render.yaml)) — Postgres +
-API + web + a daily refresh cron — ready to deploy when you connect your Render account.
+Deployment to **Render** is wired for one Docker web service plus Postgres. The container runs the
+Next.js frontend on Render's public port and the FastAPI backend privately on `127.0.0.1:8000`.
 
 ## Architecture
 
@@ -57,10 +57,15 @@ Open http://localhost:3000 and search a ticker (e.g. AAPL, MSFT, NVDA).
 
 ## Deploy to Render
 
-Push this repo to GitHub, then in Render: **New → Blueprint → select the repo**. Render reads
-[infra/render.yaml](infra/render.yaml) and provisions Postgres, the API, the web app, and a daily
-refresh cron. After the first deploy, set `SEC_USER_AGENT` (your contact email) in the dashboard.
-See [docs/prd/30-deployment-render.md](docs/prd/30-deployment-render.md).
+Use a managed Postgres database plus one Docker web service:
+
+- Database: `financial-atlas-db`, 1 GB to start, database name `atlas`.
+- Web service: `financial-atlas`, Docker runtime, Starter plan, repo root, Dockerfile `./Dockerfile`.
+- Required env: `DATABASE_URL`, `BACKEND_URL=http://127.0.0.1:8000`, `SEC_USER_AGENT`,
+  `AUTH_PASSWORD`, and `AUTH_SECRET`.
+
+[infra/render.yaml](infra/render.yaml) documents the same settings for review, but manual provisioning
+is fine. See [docs/prd/30-deployment-render.md](docs/prd/30-deployment-render.md).
 
 ## Tests
 
