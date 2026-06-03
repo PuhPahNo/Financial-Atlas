@@ -14,6 +14,7 @@ import Copilot from "@/components/paper-trading/Copilot";
 import TradersView from "@/components/paper-trading/TradersView";
 import TraderDetail from "@/components/paper-trading/TraderDetail";
 import TraderForm from "@/components/paper-trading/TraderForm";
+import AtlasMark from "@/components/AtlasMark";
 
 type View = "bots" | "builder" | "backtest" | "traders" | "ai";
 const NAV: { id: View; label: string; icon: string; title: string; sub: string }[] = [
@@ -141,9 +142,7 @@ export default function PaperTradingPage() {
     <div className="pt-scope" style={{ display: "grid", gridTemplateColumns: "240px minmax(0,1fr)", minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font-sans)" }}>
       <aside style={{ borderRight: "1px solid var(--border)", padding: "24px 18px", display: "flex", flexDirection: "column", gap: 24, position: "sticky", top: 0, height: "100vh", boxSizing: "border-box" }}>
         <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "var(--text-1)" }} title="Back to Atlas">
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: "linear-gradient(135deg, var(--cat-opt), var(--accent))", display: "grid", placeItems: "center", color: "#04040a" }}>
-            <Icon name="chart" size={16} sw={2.2} />
-          </div>
+          <AtlasMark size={30} />
           <span className="serif" style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em" }}>Atlas</span>
         </Link>
 

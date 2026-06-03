@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import SearchBar from "./SearchBar";
+import AtlasMark from "./AtlasMark";
 
 const LINKS = [
   { label: "Dashboard", href: "/" },
@@ -19,11 +20,7 @@ export default function NavBar() {
     <header className="sticky top-0 z-40 border-b border-line bg-bg/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1180px] items-center gap-5 px-7 py-3.5">
         <Link href="/" className="flex shrink-0 items-center gap-2.5 font-semibold tracking-tight">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-accent to-positive shadow-glow">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-              <path d="M2 10.5 L5.5 6 L8 8.5 L12 3" stroke="#0a0a0f" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </span>
+          <AtlasMark size={28} />
           Atlas
         </Link>
 
