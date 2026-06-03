@@ -1,0 +1,90 @@
+"""Pydantic contracts for paper trading APIs."""
+from __future__ import annotations
+
+from datetime import date
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+Category = Literal[
+    "long_term",
+    "short_term",
+    "short_selling",
+    "options",
+    "income_quality",
+    "risk_rotation",
+]
+
+
+class StrategyCreate(BaseModel):
+    category: Category
+    name: str = Field(min_length=2, max_length=120)
+    description: str = Field(default="", max_length=800)
+    history: str = Field(default="", max_length=1200)
+    methodology: str = Field(default="", max_length=1600)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    defaults: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    caveats: list[str] = Field(default_factory=list)
+
+
+class StrategyUpdate(BaseModel):
+    category: Category | None = None
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    description: str | None = Field(default=None, max_length=800)
+    history: str | None = Field(default=None, max_length=1200)
+    methodology: str | None = Field(default=None, max_length=1600)
+    parameters: dict[str, Any] | None = None
+    defaults: dict[str, Any] | None = None
+    metrics: dict[str, Any] | None = None
+    caveats: list[str] | None = None
+
+
+class BacktestRequest(BaseModel):
+    strategy_id: int | None = None
+    strategy: StrategyCreate | None = None
+    tickers: list[str] = Field(default_factory=list)
+    start_date: date
+    end_date: date
+    starting_cash: float = Field(default=100000.0, gt=0)
+    benchmark: str = "SPY"
+    transaction_cost_bps: float = Field(default=5.0, ge=0, le=100)
+    slippage_bps: float = Field(default=5.0, ge=0, le=100)
+    use_fixture_data: bool = False
+    persist_headline: bool = False  # store a compact equity preview on the strategy
+
+
+class AllocationInput(BaseModel):
+    strategy_id: int
+    weight: float = Field(ge=0, le=100)
+
+
+class AccountCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    emoji: str = Field(default="🦈", max_length=8)
+    bio: str = Field(default="", max_length=300)
+    starting_cash: float = Field(default=100000.0, gt=0)
+    allocations: list[AllocationInput] = Field(default_factory=list)
+
+
+class AccountUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    emoji: str | None = Field(default=None, max_length=8)
+    bio: str | None = Field(default=None, max_length=300)
+    starting_cash: float | None = Field(default=None, gt=0)
+    allocations: list[AllocationInput] | None = None
+
+
+class PortfolioCreate(BaseModel):
+    strategy_id: int
+    name: str = Field(min_length=2, max_length=120)
+    starting_cash: float = Field(default=100000.0, gt=0)
+
+
+class PortfolioRun(BaseModel):
+    use_fixture_data: bool = False
+
+
+def normalize_tickers(tickers: list[str]) -> list[str]:
+    return [ticker.strip().upper() for ticker in tickers if ticker.strip()]

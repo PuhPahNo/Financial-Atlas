@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #0a0a0f;
+  color: #ecEAf2;
+}
+
+/* Aurora glow — subtle, fixed, sophisticated (not loud). */
+body {
+  font-feature-settings: "cv11", "ss01";
+  background-image:
+    radial-gradient(900px 520px at 82% -8%, rgba(124, 108, 255, 0.14), transparent 60%),
+    radial-gradient(680px 420px at 2% -4%, rgba(62, 207, 142, 0.05), transparent 55%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* Tabular numerals everywhere numbers appear via the mono family. */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Reusable hairline-grid metric strip (Meridian restraint). */
+.metric-grid {
+  display: grid;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.metric-grid > * {
+  background: #0a0a0f;
+}
+
+/* ============================================================
+   Paper Trading design tokens (from Claude Design "Paper Trading.html"),
+   mapped onto the Atlas palette. Scoped under .pt-scope so they don't
+   affect the rest of the app.
+   ============================================================ */
+.pt-scope {
+  --surface-1: #131319;
+  --surface-2: #1a1a22;
+  --surface-3: #23232e;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-1: #ECEAF2;
+  --text-2: #8c8a99;
+  --text-3: #5a5965;
+  --accent: #7c6cff;
+  --accent-2: #a99bff;
+  --accent-soft: rgba(124, 108, 255, 0.15);
+  --accent-line: rgba(124, 108, 255, 0.40);
+  --pos: #3ecf8e;
+  --pos-soft: rgba(62, 207, 142, 0.14);
+  --neg: #ff6b6b;
+  --neg-soft: rgba(255, 107, 107, 0.14);
+  --cat-long: oklch(0.74 0.14 262);
+  --cat-short: oklch(0.74 0.14 296);
+  --cat-opt: oklch(0.78 0.13 176);
+  --cat-sell: oklch(0.72 0.15 22);
+  --cat-income: oklch(0.78 0.14 150);
+  --cat-rotation: oklch(0.80 0.13 78);
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  /* --font-mono inherits the global IBM Plex Mono variable from next/font */
+  --r-sm: 9px;
+  --r-md: 13px;
+  --r-lg: 18px;
+  --r-pill: 999px;
+  --shadow-pop: 0 18px 50px -12px rgba(0, 0, 0, 0.7);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  color: var(--text-1);
+}
+.pt-scope .mono { font-family: var(--font-mono); font-feature-settings: "tnum" 1; letter-spacing: -0.01em; }
+.pt-scope .serif { font-family: var(--font-display); }
+.pt-scope .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+.pt-scope .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-lg); }
+
+@keyframes pt-fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pt-slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes pt-fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pt-drawLine { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes pt-spin { to { transform: rotate(360deg); } }

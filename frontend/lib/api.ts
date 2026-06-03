@@ -1,0 +1,77 @@
+// API client (PRD 04). All requests go through the Next.js rewrite to the backend.
+
+export interface Meta {
+  ticker: string | null;
+  served_by: string | null;
+  stale: boolean;
+}
+export interface Envelope<T> {
+  data: T;
+  meta: Meta;
+}
+
+export class ApiError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+async function get<T>(path: string): Promise<Envelope<T>> {
+  const res = await fetch(`/api/v1${path}`, { headers: { Accept: "application/json" } });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = json?.error ?? {};
+    throw new ApiError(err.code ?? "INTERNAL", err.message ?? `Request failed (${res.status})`);
+  }
+  return json as Envelope<T>;
+}
+
+async function post<T>(path: string, body: unknown): Promise<Envelope<T>> {
+  const res = await fetch(`/api/v1${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = json?.error ?? {};
+    throw new ApiError(err.code ?? "INTERNAL", err.message ?? `Request failed (${res.status})`);
+  }
+  return json as Envelope<T>;
+}
+
+export const api = {
+  search: (q: string) => get<{ ticker: string; name: string }[]>(`/search?q=${encodeURIComponent(q)}`),
+  company: (t: string) => get<any>(`/company/${t}`),
+  prices: (t: string, range: string, interval: string) =>
+    get<{ bars: any[]; currency: string }>(`/prices/${t}?range=${range}&interval=${interval}`),
+  income: (t: string, period: string) => get<any>(`/financials/${t}/income?period=${period}`),
+  balance: (t: string, period: string) => get<any>(`/financials/${t}/balance-sheet?period=${period}`),
+  cashflow: (t: string, period: string) => get<any>(`/financials/${t}/cash-flow?period=${period}`),
+  cashflowAnalysis: (t: string, period: string) => get<any>(`/financials/${t}/cash-flow-analysis?period=${period}`),
+  valuation: (t: string) => get<any>(`/valuation/${t}`),
+  valuationCustom: (t: string, body: unknown) => post<any>(`/valuation/${t}`, body),
+  insiders: (t: string) => get<any>(`/ownership/${t}/insiders`),
+  institutions: (t: string) => get<any>(`/ownership/${t}/institutions`),
+  filings: (t: string, forms?: string) => get<any>(`/filings/${t}${forms ? `?forms=${forms}` : ""}`),
+  filingDocument: (url: string) => get<{ html: string; url: string }>(`/filings/document?url=${encodeURIComponent(url)}`),
+  marketMovers: () => get<any>(`/market/movers`),
+  marketContext: () => get<any>(`/market/context`),
+  bestPicks: (limit = 8) => get<any>(`/market/best-picks?limit=${limit}`),
+  news: (t: string) => get<any>(`/news/${t}`),
+  analyst: (t: string) => get<any>(`/analyst/${t}`),
+  peers: (t: string) => get<any>(`/peers/${t}`),
+  compare: (tickers: string[]) => get<any>(`/compare?tickers=${tickers.join(",")}`),
+  screenerUniverse: () => get<any>(`/screener/universe`),
+  screenerIngest: (tickers: string[]) => post<any>(`/screener/ingest`, { tickers }),
+  screen: (body: unknown) => post<any>(`/screener`, body),
+  watchlists: () => get<any>(`/watchlists`),
+  createWatchlist: (name: string) => post<any>(`/watchlists`, { name }),
+  addWatchlistItem: (id: number, ticker: string) => post<any>(`/watchlists/${id}/items`, { ticker }),
+  deleteWatchlist: (id: number) =>
+    fetch(`/api/v1/watchlists/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  removeWatchlistItem: (id: number, ticker: string) =>
+    fetch(`/api/v1/watchlists/${id}/items/${ticker}`, { method: "DELETE" }).then((r) => r.json()),
+};

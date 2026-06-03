@@ -1,0 +1,29 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.cache/
+backend/.cache/
+backend/atlas.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Local secrets / environment
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# Node / Next
+frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+*.tsbuildinfo
+
+# Local assistant/editor state
+.claude/settings.local.json
+
+# OS
+.DS_Store

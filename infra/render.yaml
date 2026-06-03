@@ -1,0 +1,65 @@
+# Render Blueprint (PRD 30) — provisions the full stack as infrastructure-as-code.
+# Deploy: push to GitHub, then in Render: New → Blueprint → pick this repo.
+# Render reads this file and creates the API, web, cron, and Postgres resources.
+#
+# After the first deploy, set the SEC_USER_AGENT secret (with your contact email)
+# in the API and cron services' env groups. Everything else is wired automatically.
+
+databases:
+  - name: financial-atlas-db
+    plan: free            # free Postgres; upgrade when the dataset grows
+    databaseName: atlas
+
+services:
+  # --- FastAPI backend -----------------------------------------------------
+  - type: web
+    name: financial-atlas-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: financial-atlas-db
+          property: connectionString
+      - key: ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: SEC_USER_AGENT
+        sync: false        # set in dashboard (your contact email — SEC requires it)
+
+  # --- Next.js frontend ----------------------------------------------------
+  - type: web
+    name: financial-atlas-web
+    runtime: node
+    rootDir: frontend
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: BACKEND_URL
+        fromService:
+          name: financial-atlas-api
+          type: web
+          property: host   # bare hostname; next.config.mjs prepends https:// for the /api rewrite
+
+  # --- Daily snapshot refresh ---------------------------------------------
+  - type: cron
+    name: financial-atlas-refresh
+    runtime: python
+    rootDir: backend
+    plan: free
+    schedule: "0 6 * * *"      # 06:00 UTC daily, after US close
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs.refresh
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: financial-atlas-db
+          property: connectionString
+      - key: SEC_USER_AGENT
+        sync: false
