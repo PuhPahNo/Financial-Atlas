@@ -14,6 +14,8 @@ from .core.errors import AtlasError
 from .db import init_db
 
 logging.basicConfig(level=settings.log_level.upper())
+for noisy_logger in ("httpx", "httpcore"):
+    logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 init_db()  # create tables if absent (SQLite locally, Postgres on Render)
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -48,6 +49,29 @@ _LIMITS = {
 _DEFAULT_LIMIT = _TokenBucket(rate=4, burst=4)
 
 _client = httpx.Client(timeout=20.0, follow_redirects=True, headers={"Accept-Encoding": "gzip, deflate"})
+_SENSITIVE_QUERY_KEYS = {"apikey", "api_key", "api-key", "access_token", "token", "secret", "password", "key"}
+
+
+def _redact_url(url: str) -> str:
+    try:
+        parts = urlsplit(str(url))
+    except ValueError:
+        return "<redacted-url>"
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if not query:
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, parts.fragment))
+    safe_query = [
+        (key, "REDACTED" if key.lower() in _SENSITIVE_QUERY_KEYS else value)
+        for key, value in query
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(safe_query), parts.fragment))
+
+
+def _request_url(resp: httpx.Response, fallback: str) -> str:
+    try:
+        return str(resp.request.url)
+    except RuntimeError:
+        return fallback
 
 
 def get_json(url: str, *, headers: dict | None = None, params: dict | None = None, provider: str = "") -> dict:
@@ -56,10 +80,10 @@ def get_json(url: str, *, headers: dict | None = None, params: dict | None = Non
     try:
         resp = _client.get(url, headers=headers, params=params)
     except httpx.HTTPError as exc:
-        raise ProviderError(f"{provider or host} request failed: {exc}") from exc
+        raise ProviderError(f"{provider or host} request failed: {type(exc).__name__}") from exc
 
     if resp.status_code == 404:
-        raise NotFoundError(f"{provider or host} returned 404 for {url}")
+        raise NotFoundError(f"{provider or host} returned 404 for {_redact_url(_request_url(resp, url))}")
     if resp.status_code == 429:
         raise RateLimitError(f"{provider or host} rate limited", retry_after_seconds=int(resp.headers.get("Retry-After", 30)))
     if resp.status_code >= 400:
@@ -77,9 +101,9 @@ def get_text(url: str, *, headers: dict | None = None, provider: str = "") -> st
     try:
         resp = _client.get(url, headers=headers)
     except httpx.HTTPError as exc:
-        raise ProviderError(f"{provider or host} request failed: {exc}") from exc
+        raise ProviderError(f"{provider or host} request failed: {type(exc).__name__}") from exc
     if resp.status_code == 404:
-        raise NotFoundError(f"{provider or host} returned 404 for {url}")
+        raise NotFoundError(f"{provider or host} returned 404 for {_redact_url(_request_url(resp, url))}")
     if resp.status_code == 429:
         raise RateLimitError(f"{provider or host} rate limited")
     if resp.status_code >= 400:
