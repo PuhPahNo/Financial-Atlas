@@ -105,6 +105,12 @@ export interface AccountPerformance {
   risk?: AccountRisk; attribution?: AccountAttribution;
   contributions: Contribution[]; warnings: string[];
 }
+export interface AccountValue {
+  account_id: number; current_value: number; eod_value: number;
+  day_change: number; day_change_pct: number; as_of: string;
+  market_open: boolean; delayed_minutes: number; served_by: string; stale: boolean;
+  warnings: string[];
+}
 export interface RebalanceOrder {
   strategy_id: number; name: string; category: string | null; strategy_status: string; archived: boolean;
   current_weight: number; target_weight: number; delta_weight: number;
@@ -152,6 +158,7 @@ export const paperTradingApi = {
     const qs = start && end ? `?start=${start}&end=${end}` : "";
     return request<AccountPerformance>(`/paper-trading/accounts/${id}/performance${qs}`);
   },
+  accountValue: (id: number) => request<AccountValue>(`/paper-trading/accounts/${id}/value`),
   createAssistantSession: () => request<{ session: any; actions: any[] }>("/assistant/sessions", { method: "POST", body: body({}) }),
   sendAssistantMessage: (sessionId: number, message: string) =>
     request<any>(`/assistant/sessions/${sessionId}/messages`, { method: "POST", body: body({ message }) }),

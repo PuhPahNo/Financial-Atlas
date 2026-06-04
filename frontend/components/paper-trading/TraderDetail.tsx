@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { paperTradingApi, TraderAccount, AccountPerformance } from "@/lib/paperTradingApi";
+import { paperTradingApi, TraderAccount, AccountPerformance, AccountValue } from "@/lib/paperTradingApi";
 import { Btn, IconBtn, Pill, CatDot, Icon } from "./ptkit";
 import { AreaChart, Pt } from "./ptcharts";
 import { CAT_HUES, fmt } from "./ptdata";
@@ -18,6 +18,7 @@ function Tile({ label, value, tone }: { label: string; value: string; tone?: "po
 export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
   account: TraderAccount | null; onClose: () => void; onEdit: (a: TraderAccount) => void; onDelete: (a: TraderAccount) => void }) {
   const [perf, setPerf] = useState<AccountPerformance | null>(null);
+  const [value, setValue] = useState<AccountValue | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +37,37 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
     return () => { cancelled = true; };
   }, [account?.id]);
 
+  // Live-ish value: fetch on mount, then poll ~60s while open (Yahoo is ~15-min delayed,
+  // so faster is pointless). Independent of the heavy /performance fetch above.
+  useEffect(() => {
+    setValue(null);
+    if (!account) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await paperTradingApi.accountValue(account.id);
+        if (!cancelled) setValue(res.data);
+      } catch { /* keep last value; the performance panel still renders */ }
+    };
+    load();
+    const id = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [account?.id]);
+
   if (!account) return null;
+
+  const headlineValue = value?.current_value ?? (perf ? perf.current_value : null);
+  const dayChange = value?.day_change ?? 0;
+  const dayUp = dayChange >= 0;
+  const fmtAsOf = (iso: string) =>
+    iso.includes("T")
+      ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : iso;
+  const freshness = value
+    ? value.market_open
+      ? `Live · as of ${fmtAsOf(value.as_of)} · ${value.delayed_minutes}-min delayed${value.stale ? " · stale" : ""}`
+      : `Market closed · last close ${value.as_of}`
+    : null;
 
   const up = perf ? perf.total_return >= 0 : true;
   const beat = perf ? perf.alpha >= 0 : true;
@@ -74,10 +105,21 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
           <>
             <div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap", marginBottom: 4 }}>
-                <span className="mono" style={{ fontSize: 32, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}>{fmt.usd0(perf.current_value)}</span>
+                <span className="mono" style={{ fontSize: 32, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}>{fmt.usd0(headlineValue ?? perf.current_value)}</span>
                 <Pill tone={up ? "pos" : "neg"}>{fmt.pct(perf.total_return * 100)}</Pill>
+                {value && value.market_open && (
+                  <Pill tone={dayUp ? "pos" : "neg"}>
+                    {dayUp ? "+" : "−"}{fmt.usd0(Math.abs(value.day_change))} ({fmt.pct(value.day_change_pct * 100)}) today
+                  </Pill>
+                )}
                 <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>from {fmt.usd0(perf.starting_cash)} · {perf.window.start} → {perf.window.end}</span>
               </div>
+              {freshness && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, fontSize: 11.5, color: "var(--text-3)" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 999, background: value?.market_open ? "var(--pos)" : "var(--text-3)", flexShrink: 0 }} />
+                  <span className="mono">{freshness}</span>
+                </div>
+              )}
               <div className="card" style={{ padding: "14px 8px 4px", background: "var(--surface-2)", borderRadius: "var(--r-md)" }}>
                 <AreaChart series={equity} benchmark={bench} color={up ? "var(--pos)" : "var(--neg)"} height={170} uid={"t" + account.id} valueFmt={fmt.usd0} seriesLabel={account.name.length > 16 ? "Account" : account.name} animate={false} />
               </div>

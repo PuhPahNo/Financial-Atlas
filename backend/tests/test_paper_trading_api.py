@@ -1,7 +1,11 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.backtesting import engine
 from app.paper_trading import accounts as account_service
+from app.providers.base import Quote
 from auth_helpers import authenticate
 
 client = authenticate(TestClient(app))
@@ -471,3 +475,97 @@ def test_account_performance_attribution_reconciles(monkeypatch):
     assert perf["contributions"][0]["name"] == "Attribution A"
     assert perf["contributions"][-1]["name"] == "Attribution B"
     assert perf["drawdown_curve"]
+
+
+# ---- Live-ish valuation (PRD live-paper-valuation) ------------------------
+
+def _fake_snap(holdings, cash, eod_value, tickers, as_of_date="2026-06-03"):
+    return {
+        "holdings": holdings, "cash": cash, "tickers": tickers,
+        "eod_value": eod_value, "as_of_date": as_of_date,
+        "starting_cash": 100000.0, "warnings": [],
+    }
+
+
+def test_account_value_marks_long_holdings_to_live_quote(monkeypatch):
+    snap = _fake_snap(
+        holdings=[{"ticker": "AAA", "quantity": 10, "direction": "long", "entry_price": 100.0, "last_close": 100.0}],
+        cash=500.0, eod_value=1500.0, tickers=["AAA"],
+    )
+    monkeypatch.setattr(account_service, "account_holdings", lambda account_id: snap)
+    monkeypatch.setattr(account_service.market_hours, "is_market_open", lambda now=None: True)
+    monkeypatch.setattr(account_service.prices, "live_quotes",
+                        lambda tickers: ({"AAA": Quote(price=110.0, previous_close=100.0)}, "yahoo"))
+
+    res = client.get("/api/v1/paper-trading/accounts/999001/value")
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["market_open"] is True
+    assert data["stale"] is False
+    assert data["current_value"] == 1600.0          # 500 cash + 10 * 110
+    assert data["day_change"] == 100.0              # (110 - 100) * 10
+    assert abs(data["day_change_pct"] - 0.0667) < 0.001
+    assert data["delayed_minutes"] == 15
+
+
+def test_account_value_marks_short_position_via_entry_minus_price(monkeypatch):
+    snap = _fake_snap(
+        holdings=[{"ticker": "BBB", "quantity": 5, "direction": "short", "entry_price": 50.0, "last_close": 50.0}],
+        cash=1000.0, eod_value=1000.0, tickers=["BBB"],
+    )
+    monkeypatch.setattr(account_service, "account_holdings", lambda account_id: snap)
+    monkeypatch.setattr(account_service.market_hours, "is_market_open", lambda now=None: True)
+    monkeypatch.setattr(account_service.prices, "live_quotes",
+                        lambda tickers: ({"BBB": Quote(price=40.0, previous_close=50.0)}, "yahoo"))
+
+    data = client.get("/api/v1/paper-trading/accounts/999002/value").json()["data"]
+    assert data["current_value"] == 1050.0          # 1000 + 5 * (50 - 40)
+    assert data["day_change"] == 50.0
+
+
+def test_account_value_returns_eod_baseline_when_market_closed(monkeypatch):
+    snap = _fake_snap(
+        holdings=[{"ticker": "AAA", "quantity": 10, "direction": "long", "entry_price": 100.0, "last_close": 100.0}],
+        cash=500.0, eod_value=1500.0, tickers=["AAA"],
+    )
+    monkeypatch.setattr(account_service, "account_holdings", lambda account_id: snap)
+    monkeypatch.setattr(account_service.market_hours, "is_market_open", lambda now=None: False)
+
+    def explode(tickers):  # quotes must not be fetched while the market is closed
+        raise AssertionError("quotes fetched while market closed")
+    monkeypatch.setattr(account_service.prices, "live_quotes", explode)
+
+    data = client.get("/api/v1/paper-trading/accounts/999003/value").json()["data"]
+    assert data["market_open"] is False
+    assert data["current_value"] == 1500.0
+    assert data["day_change"] == 0.0
+    assert data["as_of"] == "2026-06-03"
+
+
+def test_account_value_falls_back_to_baseline_on_quote_failure(monkeypatch):
+    snap = _fake_snap(
+        holdings=[{"ticker": "AAA", "quantity": 10, "direction": "long", "entry_price": 100.0, "last_close": 100.0}],
+        cash=500.0, eod_value=1500.0, tickers=["AAA"],
+    )
+    monkeypatch.setattr(account_service, "account_holdings", lambda account_id: snap)
+    monkeypatch.setattr(account_service.market_hours, "is_market_open", lambda now=None: True)
+    monkeypatch.setattr(account_service.prices, "live_quotes", lambda tickers: ({"AAA": None}, "yahoo"))
+
+    data = client.get("/api/v1/paper-trading/accounts/999004/value").json()["data"]
+    assert data["stale"] is True
+    assert data["current_value"] == 1500.0          # EOD baseline preserved
+
+
+def test_backtest_exposes_settled_holdings_without_changing_curve():
+    res = engine.run_backtest(
+        strategy={"name": "X", "parameters": {"tickers": ["AAA"]}},
+        tickers=["AAA"], start_date=date(2020, 1, 1), end_date=date(2020, 1, 5),
+        starting_cash=10000.0, use_fixture_data=True,
+    )
+    fh = res["final_holdings"]
+    assert len(fh) == 1
+    assert fh[0]["direction"] == "long"
+    assert fh[0]["quantity"] > 0
+    assert fh[0]["last_close"] == 13.0              # last fixture close
+    assert res["residual_cash"] >= 0
+    assert len(res["equity_curve"]) == 5            # historical curve unchanged

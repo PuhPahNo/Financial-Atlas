@@ -30,3 +30,23 @@ def price_window(ticker: str, *, start: date, end: date, interval: str = "1d"):
 def quote(ticker: str):
     q, served_by = run_chain("quote", "get_quote", ticker)
     return q, served_by
+
+
+def live_quotes(tickers: list[str]):
+    """Quotes for a deduplicated set of tickers, each fetched at most once.
+
+    Per-ticker failures are tolerated (value ``None``) so one bad symbol does not sink
+    the batch; the short-TTL quote cache means repeated reads within a refresh window
+    coalesce. Returns ``(quotes, served_by)``.
+    """
+    quotes: dict[str, object] = {}
+    served_by: str | None = None
+    seen = dict.fromkeys(t.strip().upper() for t in tickers if t and t.strip())
+    for ticker in seen:
+        try:
+            q, src = run_chain("quote", "get_quote", ticker)
+            quotes[ticker] = q
+            served_by = served_by or src
+        except Exception:  # noqa: BLE001 — a single bad symbol shouldn't sink the batch
+            quotes[ticker] = None
+    return quotes, served_by or "yahoo"

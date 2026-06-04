@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     paper_trading_rate_limit_per_minute: int = 240
     assistant_rate_limit_per_minute: int = 20
     auth_rate_limit_per_minute: int = 12
+
+    # Live-ish paper trader valuation (PRD live-paper-valuation). The in-process refresh
+    # tick pre-warms account marks during market hours; quotes are short-cached so reads
+    # within a refresh window coalesce. Yahoo is ~15-min delayed, so faster than ~60s is
+    # pointless. Set live_mark_enabled=false to disable the background tick (read path
+    # still serves correct values on demand).
+    live_mark_enabled: bool = True
+    live_mark_interval_seconds: int = 60
+    live_quote_ttl_seconds: int = 60
     # Reserved for the future paper-trading / backtesting phase (Alpaca).
     alpaca_api_key: str = ""
     alpaca_secret: str = ""

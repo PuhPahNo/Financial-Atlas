@@ -206,7 +206,16 @@ def _buy_hold(*, ticker, bars, starting_cash, cost_rate, benchmark_fn, end_date)
             "benchmark_equity": starting_cash * (benchmark_fn(day) if benchmark_fn else close / float(first["close"])),
         })
     last = bars[-1]
-    sell_price = float(last["close"]) * (1 - cost_rate)
+    last_close = float(last["close"])
+    # Settled position going into the next session — captured *before* the synthetic
+    # end-of-window sale below, so the live overlay can mark these shares to a fresh quote.
+    final_holdings = (
+        [{"ticker": ticker, "quantity": quantity, "direction": "long",
+          "entry_price": buy_price, "last_close": last_close}]
+        if quantity > 0 else []
+    )
+    residual_cash = cash  # cash held alongside the position, pre-liquidation
+    sell_price = last_close * (1 - cost_rate)
     proceeds = quantity * sell_price
     cash += proceeds
     trades.append({
@@ -217,7 +226,7 @@ def _buy_hold(*, ticker, bars, starting_cash, cost_rate, benchmark_fn, end_date)
     equity_curve[-1]["cash"] = cash
     equity_curve[-1]["equity"] = cash
     holdings = [{"ticker": ticker, "weight": 1.0}]
-    return trades, equity_curve, holdings
+    return trades, equity_curve, holdings, final_holdings, residual_cash
 
 
 def _run_rules(*, spec, bars, ref_bars, starting_cash, cost_rate, benchmark_fn, start_date, end_date, warnings):
@@ -312,6 +321,17 @@ def _run_rules(*, spec, bars, ref_bars, starting_cash, cost_rate, benchmark_fn, 
             "benchmark_equity": starting_cash * (benchmark_fn(day) if benchmark_fn else close / first_close),
         })
 
+    # Settled position going into the next session — captured *before* the synthetic
+    # end-of-window liquidation, so the live overlay can mark it to a fresh quote.
+    if pos is not None:
+        final_holdings = [{
+            "ticker": instrument, "quantity": pos["qty"], "direction": direction,
+            "entry_price": pos["entry_price"], "last_close": float(bars[-1]["close"]),
+        }]
+    else:
+        final_holdings = []
+    residual_cash = cash  # cash alongside the open position, pre-liquidation
+
     if pos is not None:
         last = bars[-1]
         close_position(_parse_day(last["date"]), float(last["close"]), "end of backtest")
@@ -323,7 +343,7 @@ def _run_rules(*, spec, bars, ref_bars, starting_cash, cost_rate, benchmark_fn, 
         warnings.append("No entry signals fired in this window — the strategy stayed in cash.")
     in_market = round(days_in_market / max(1, len(equity_curve)), 3)
     holdings = [{"ticker": instrument, "weight": in_market}, {"ticker": "Cash", "weight": round(1 - in_market, 3)}]
-    return trades, equity_curve, holdings
+    return trades, equity_curve, holdings, final_holdings, residual_cash
 
 
 # --------------------------------------------------------------------------- #
@@ -393,13 +413,13 @@ def run_backtest(
         raise ValidationError("Backtest needs at least two price bars in the window", ticker=instrument)
 
     if spec:
-        trades, equity_curve, holdings = _run_rules(
+        trades, equity_curve, holdings, final_holdings, residual_cash = _run_rules(
             spec=spec, bars=bars, ref_bars=ref_bars, starting_cash=starting_cash,
             cost_rate=cost_rate, benchmark_fn=benchmark_fn, start_date=start_date,
             end_date=end_date, warnings=warnings,
         )
     else:
-        trades, equity_curve, holdings = _buy_hold(
+        trades, equity_curve, holdings, final_holdings, residual_cash = _buy_hold(
             ticker=instrument, bars=bars, starting_cash=starting_cash, cost_rate=cost_rate,
             benchmark_fn=benchmark_fn, end_date=end_date,
         )
@@ -414,6 +434,10 @@ def run_backtest(
         "metrics": summarize(equity_curve, trades, starting_cash),
         "warnings": warnings,
         "holdings": holdings,
+        # Settled position(s) going into the next session (pre-liquidation) — powers the
+        # live intraday mark; does not affect equity_curve/metrics/holdings above.
+        "final_holdings": final_holdings,
+        "residual_cash": residual_cash,
         "date_range": {"start": start_date, "end": end_date},
     }
 

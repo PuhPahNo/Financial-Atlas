@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from ..core import cache
+from ..core.config import settings
 from ..core.errors import ProviderError
 from ..core.http import get_json
 from .base import Capability, Interval, PriceBar, Quote
@@ -49,6 +50,20 @@ class YahooProvider:
         ttl = 6 * 3600  # historical windows are immutable; cache longer
         return cache.get_or_set("yahoo", f"chart:{sym}:{period1}-{period2}:{interval}", ttl_seconds=ttl, loader=load).value
 
+    def _quote_chart(self, ticker: str) -> dict:
+        """5-day daily chart used only for live quotes, cached for a short window
+        (``settings.live_quote_ttl_seconds``) so quotes can be ~1 minute fresh while the
+        1-hour daily-bar cache used by backtests is left untouched. Yahoo's
+        ``meta.regularMarketPrice`` here is the ~15-min-delayed last price."""
+        sym = ticker.upper().replace(".", "-")
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+
+        def load():
+            return get_json(url, headers=_HEADERS, params={"range": "5d", "interval": "1d"}, provider=self.name)
+
+        ttl = max(1, settings.live_quote_ttl_seconds)
+        return cache.get_or_set("yahoo", f"quote:{sym}", ttl_seconds=ttl, loader=load).value
+
     @staticmethod
     def _parse_result(result: dict | None, ticker: str) -> list[PriceBar]:
         if not result:
@@ -84,7 +99,8 @@ class YahooProvider:
 
     def get_quote(self, ticker: str) -> Quote:
         # Short window so the "previous close" is the prior session, not a year ago.
-        data = self._chart(ticker, yrange="5d", interval="1d")
+        # Uses the short-TTL quote cache (not the 1h daily-bar cache) so live marks stay fresh.
+        data = self._quote_chart(ticker)
         result = (data.get("chart", {}).get("result") or [None])[0]
         if not result:
             raise ProviderError(f"Yahoo returned no quote for {ticker}")

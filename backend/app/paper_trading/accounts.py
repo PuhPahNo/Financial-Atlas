@@ -4,13 +4,15 @@ allocated strategy's backtest over a shared window."""
 from __future__ import annotations
 
 import bisect
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from ..backtesting.engine import run_backtest as execute_backtest
 from ..backtesting.metrics import max_drawdown
+from ..core import cache, market_hours
 from ..core.errors import NotFoundError, ValidationError
 from ..db import session_scope
 from ..models.paper_trading import AccountAllocation, TraderAccount, TradingStrategy
+from ..services import prices
 from .schemas import AccountCreate, AccountRebalanceRequest, AccountUpdate, normalize_tickers
 from .service import _strategy_view
 
@@ -428,3 +430,180 @@ def account_performance(account_id: int, start: date | None = None, end: date | 
         "contributions": contributions,
         "warnings": list(dict.fromkeys(warnings))[:4],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Live-ish valuation (PRD live-paper-valuation)                               #
+#                                                                             #
+# Splits the slow-moving *state* (the shares each strategy holds going into   #
+# the next session) from the fast-moving *valuation* (marking those shares to #
+# a ~15-min-delayed Yahoo quote). The settled-holdings snapshot is cached for #
+# a trading day; the mark is recomputed on demand whenever a quote is fresher #
+# than the cache. Both the read path and the in-process tick call             #
+# ``ensure_fresh_mark`` so there is one freshness-gated code path.            #
+# --------------------------------------------------------------------------- #
+
+DELAYED_MINUTES = 15  # Yahoo free quotes are ~15-minute delayed.
+
+
+def _holdings_window() -> tuple[date, date]:
+    """Backtest window for settled holdings — ends on the last completed trading day so the
+    settled position reflects a real session close, not an in-progress bar."""
+    end = market_hours.last_trading_day()
+    return date(end.year - 3, end.month, 1), end
+
+
+def _leg_value(holding: dict, price: float) -> float:
+    """Mark-to-market contribution of one settled position at ``price``.
+    Long = qty·price; short = qty·(entry − price) added to cash."""
+    qty = float(holding.get("quantity") or 0.0)
+    if holding.get("direction") == "short":
+        return qty * (float(holding.get("entry_price") or 0.0) - price)
+    return qty * price
+
+
+def _active_account_ids() -> list[int]:
+    with session_scope() as session:
+        rows = session.query(TraderAccount.id).filter_by(status="active").all()
+        return [r[0] for r in rows]
+
+
+def _compute_holdings(account_id: int) -> dict:
+    """Run each allocated sleeve's backtest once and aggregate the settled positions the
+    account holds going into the next session, plus the baseline cash and EOD value."""
+    start, end = _holdings_window()
+    with session_scope() as session:
+        account = session.get(TraderAccount, account_id)
+        if not account or account.status != "active":
+            raise NotFoundError(f"Trader account {account_id} not found")
+        strategies = _strategies_map(session, account)
+        starting_cash = float(account.starting_cash)
+        allocs = [(a.weight, _strategy_view(strategies[a.strategy_id]))
+                  for a in account.allocations if a.strategy_id in strategies and a.weight > 0]
+
+    invested_dollars = sum(starting_cash * w / 100 for w, _ in allocs)
+    cash = max(0.0, starting_cash - invested_dollars)  # account-level uninvested cash
+    holdings: list[dict] = []
+    warnings: list[str] = []
+    for weight, view in allocs:
+        dollars = starting_cash * weight / 100
+        tickers = normalize_tickers(view.get("parameters", {}).get("tickers", []))
+        try:
+            res = execute_backtest(
+                strategy=view, tickers=tickers, start_date=start, end_date=end,
+                starting_cash=dollars, benchmark="SPY",
+            )
+        except Exception as exc:  # noqa: BLE001 — one broken sleeve shouldn't sink the mark
+            warnings.append(f"{view['name']}: {exc}")
+            cash += dollars  # treat the unresolved sleeve as cash so totals still reconcile
+            continue
+        cash += float(res.get("residual_cash") or 0.0)
+        for h in res.get("final_holdings", []) or []:
+            if (h.get("quantity") or 0) and h.get("last_close") is not None:
+                holdings.append({
+                    "ticker": str(h["ticker"]).upper(),
+                    "quantity": float(h["quantity"]),
+                    "direction": h.get("direction", "long"),
+                    "entry_price": float(h.get("entry_price") or 0.0),
+                    "last_close": float(h["last_close"]),
+                })
+
+    eod_value = cash + sum(_leg_value(h, h["last_close"]) for h in holdings)
+    return {
+        "holdings": holdings,
+        "cash": round(cash, 4),
+        "tickers": sorted({h["ticker"] for h in holdings}),
+        "eod_value": round(eod_value, 2),
+        "as_of_date": end.isoformat(),
+        "starting_cash": starting_cash,
+        "warnings": list(dict.fromkeys(warnings))[:4],
+    }
+
+
+def account_holdings(account_id: int) -> dict:
+    """Settled-holdings snapshot, cached for the trading day. The cache key folds in the
+    last trading day, the allocation set, and starting cash, so the expensive backtests
+    re-run at most ~once per trading day or whenever allocations change."""
+    with session_scope() as session:
+        account = session.get(TraderAccount, account_id)
+        if not account or account.status != "active":
+            raise NotFoundError(f"Trader account {account_id} not found")
+        sig = ";".join(
+            f"{a.strategy_id}:{a.weight}" for a in sorted(account.allocations, key=lambda x: x.strategy_id)
+        )
+        sig = f"{float(account.starting_cash)}|{sig}"
+    key = f"{account_id}:{market_hours.last_trading_day().isoformat()}:{sig}"
+    return cache.get_or_set(
+        "account_holdings", key, ttl_seconds=24 * 3600, loader=lambda: _compute_holdings(account_id)
+    ).value
+
+
+def ensure_fresh_mark(account_id: int) -> dict:
+    """Freshness-gated live mark. Loads the settled-holdings snapshot, then — only while the
+    market is open — marks the held shares to a fresh quote and reports the day's change.
+    Market closed, all-cash, or a failed quote fetch all fall back to the EOD baseline."""
+    snap = account_holdings(account_id)
+    cash = float(snap["cash"])
+    holdings = snap["holdings"]
+    eod_value = float(snap["eod_value"])
+    now = datetime.now(timezone.utc)
+    open_now = market_hours.is_market_open(now)
+
+    result = {
+        "account_id": account_id,
+        "current_value": round(eod_value, 2),
+        "eod_value": round(eod_value, 2),
+        "day_change": 0.0,
+        "day_change_pct": 0.0,
+        "as_of": snap["as_of_date"],
+        "market_open": open_now,
+        "delayed_minutes": DELAYED_MINUTES,
+        "served_by": "eod",
+        "stale": False,
+        "warnings": snap.get("warnings", []),
+    }
+    if not open_now or not holdings:
+        return result
+
+    quotes, served_by = prices.live_quotes(snap["tickers"])
+    prev_value = cash
+    live_value = cash
+    marked = False
+    for h in holdings:
+        q = quotes.get(h["ticker"])
+        price = getattr(q, "price", None) if q is not None else None
+        if price is None:  # missing leg → no intraday move for it
+            prev_value += _leg_value(h, h["last_close"])
+            live_value += _leg_value(h, h["last_close"])
+            continue
+        marked = True
+        prev = getattr(q, "previous_close", None)
+        prev = float(prev) if prev is not None else h["last_close"]
+        prev_value += _leg_value(h, prev)
+        live_value += _leg_value(h, float(price))
+
+    if not marked:  # every quote failed → serve the EOD baseline, flagged stale
+        result["stale"] = True
+        return result
+
+    day_change = live_value - prev_value
+    result["current_value"] = round(live_value, 2)
+    result["day_change"] = round(day_change, 2)
+    result["day_change_pct"] = round(day_change / prev_value, 4) if prev_value else 0.0
+    result["as_of"] = now.isoformat()
+    result["served_by"] = served_by
+    return result
+
+
+def warm_active_marks() -> int:
+    """Pre-warm live marks for all active accounts (used by the in-process tick). Returns
+    the number of accounts refreshed. Best-effort: a single failure never aborts the batch."""
+    ids = _active_account_ids()
+    refreshed = 0
+    for account_id in ids:
+        try:
+            ensure_fresh_mark(account_id)
+            refreshed += 1
+        except Exception:  # noqa: BLE001 — keep the tick alive across a bad account
+            continue
+    return refreshed

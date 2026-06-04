@@ -127,3 +127,10 @@ def delete_account(account_id: int):
 @router.get("/paper-trading/accounts/{account_id}/performance")
 def account_performance(account_id: int, start: date | None = None, end: date | None = None):
     return envelope(accounts.account_performance(account_id, start, end))
+
+
+@router.get("/paper-trading/accounts/{account_id}/value")
+def account_value(account_id: int):
+    """Lightweight live-ish mark for polling — marks settled holdings to a fresh quote
+    while the market is open, else returns the EOD baseline. Cheap relative to /performance."""
+    return envelope(accounts.ensure_fresh_mark(account_id))
