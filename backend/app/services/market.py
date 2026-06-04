@@ -6,6 +6,8 @@ snapshot table sorted by margin of safety.
 """
 from __future__ import annotations
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from ..core import cache
 from ..db import CompanySnapshot, session_scope
 from ..providers.base import Interval
@@ -55,13 +57,24 @@ def context() -> dict:
 
 def best_picks(limit: int = 8) -> dict:
     """Most-undervalued names from the local universe (highest margin of safety)."""
-    with session_scope() as s:
-        rows = (s.query(CompanySnapshot)
-                .filter(CompanySnapshot.margin_of_safety.isnot(None))
-                .order_by(CompanySnapshot.margin_of_safety.desc())
-                .limit(limit).all())
-        return {"picks": [{
-            "ticker": r.ticker, "name": r.name, "price": r.price,
-            "blended_fair_value": r.blended_fair_value, "margin_of_safety": r.margin_of_safety,
-            "fcf_margin": r.fcf_margin,
-        } for r in rows]}
+    try:
+        with session_scope() as s:
+            rows = (s.query(CompanySnapshot)
+                    .filter(CompanySnapshot.margin_of_safety.isnot(None))
+                    .order_by(CompanySnapshot.margin_of_safety.desc())
+                    .limit(limit).all())
+            return {"picks": [{
+                "ticker": r.ticker, "name": r.name, "price": r.price,
+                "blended_fair_value": r.blended_fair_value, "margin_of_safety": r.margin_of_safety,
+                "fcf_margin": r.fcf_margin,
+            } for r in rows]}
+    except SQLAlchemyError:
+        return {
+            "picks": [],
+            "available": False,
+            "warnings": [{
+                "section": "best_picks",
+                "code": "DATABASE_UNAVAILABLE",
+                "message": "Best picks are temporarily unavailable while the database reconnects.",
+            }],
+        }

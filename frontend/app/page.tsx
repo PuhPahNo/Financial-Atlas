@@ -79,7 +79,12 @@ export default function Dashboard() {
           {/* Your interests */}
           <Card className="p-5">
             <div className="mb-3 text-[11px] uppercase tracking-wider text-muted">Your interests</div>
-            {recents.length === 0 && !(watchlists.data?.watchlists?.length) ? (
+            {watchlists.error && recents.length === 0 ? (
+              <p className="text-sm text-muted">
+                <Link href="/login?next=/" className="text-accent hover:underline">Sign in</Link>
+                {" "}to view watchlists.
+              </p>
+            ) : recents.length === 0 && !(watchlists.data?.watchlists?.length) ? (
               <p className="text-sm text-muted">Search a ticker to start — recents and watchlists show here.</p>
             ) : (
               <div className="space-y-4">
