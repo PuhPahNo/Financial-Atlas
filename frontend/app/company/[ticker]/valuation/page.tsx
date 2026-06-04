@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { price, pct, signClass } from "@/lib/format";
+import { etDateTime } from "@/lib/datetime";
 import { Panel, StateView, Tooltip } from "@/components/ui";
 
 const MODELS: Record<string, { label: string; formula: string; plain: string; lever: string }> = {
@@ -324,7 +325,7 @@ function ValuationHistory({ rows }: { rows: any[] }) {
           <tbody>
             {rows.slice(0, 6).map((row) => (
               <tr key={row.id} className="border-t border-line">
-                <td className="py-2 pr-4 text-muted">{row.valuation_date ? new Date(row.valuation_date).toLocaleString() : "—"}</td>
+                <td className="py-2 pr-4 text-muted">{etDateTime(row.valuation_date)}</td>
                 <td className="py-2 pr-4 text-right font-mono">{price(row.current_price)}</td>
                 <td className="py-2 pr-4 text-right font-mono">{price(row.blended_fair_value)}</td>
                 <td className={`py-2 text-right font-mono ${signClass(row.margin_of_safety)}`}>{pct(row.margin_of_safety, 1)}</td>

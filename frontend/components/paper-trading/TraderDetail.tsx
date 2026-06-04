@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { paperTradingApi, TraderAccount, AccountPerformance, AccountValue } from "@/lib/paperTradingApi";
+import { etTime, etDate } from "@/lib/datetime";
 import { Btn, IconBtn, Pill, CatDot, Icon } from "./ptkit";
 import { AreaChart, Pt } from "./ptcharts";
 import { CAT_HUES, fmt } from "./ptdata";
@@ -59,14 +60,10 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
   const headlineValue = value?.current_value ?? (perf ? perf.current_value : null);
   const dayChange = value?.day_change ?? 0;
   const dayUp = dayChange >= 0;
-  const fmtAsOf = (iso: string) =>
-    iso.includes("T")
-      ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : iso;
   const freshness = value
     ? value.market_open
-      ? `Live · as of ${fmtAsOf(value.as_of)} · ${value.delayed_minutes}-min delayed${value.stale ? " · stale" : ""}`
-      : `Market closed · last close ${value.as_of}`
+      ? `Live · as of ${etTime(value.as_of)} · ${value.delayed_minutes}-min delayed${value.stale ? " · stale" : ""}`
+      : `Market closed · last close ${etDate(value.as_of)}`
     : null;
 
   const up = perf ? perf.total_return >= 0 : true;
