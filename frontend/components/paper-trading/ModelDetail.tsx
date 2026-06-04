@@ -118,6 +118,11 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
         <section>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Methodology</div>
           <p style={{ margin: 0, fontSize: 14, color: "var(--text-2)", lineHeight: 1.65 }}>{model.methodology}</p>
+          <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--text-3)", lineHeight: 1.55 }}>
+            Backtests use <strong>point-in-time entry</strong> — a position opens only when the criteria were met at that
+            date, using data available then (no look-ahead). The candidate universe is user-specified; survivorship and
+            selection bias are not modeled.
+          </p>
         </section>
 
         {model.params.length > 0 && (
