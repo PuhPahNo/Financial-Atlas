@@ -81,8 +81,9 @@ def test_fundamental_gate_waits_for_filing(monkeypatch):
     assert all(t["date"] >= date(2021, 1, 1) for t in buys)  # never before the filing was known
 
 
-def test_real_backtest_routes_through_screening_with_caveats():
-    """The no-look-ahead caveats are attached to real (non-fixture) screening results."""
+def test_real_backtest_routes_through_screening_with_universe_caveat():
+    """Real (non-fixture) backtests route through screening and carry the survivorship caveat.
+    Point-in-time entry is the expected default, so it is intentionally not flagged."""
     start, end, hist0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
     import app.backtesting.screen as s
     series = {"AAA": _daily(hist0, end, lambda d: 100.0), "SPY": _daily(hist0, end, lambda d: 100.0)}
@@ -94,5 +95,5 @@ def test_real_backtest_routes_through_screening_with_caveats():
                            tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)
     finally:
         s.prices.price_window = orig
-    assert any("no look-ahead" in w.lower() for w in res["warnings"])
     assert any("survivorship" in w.lower() for w in res["warnings"])
+    assert not any("look-ahead" in w.lower() for w in res["warnings"])

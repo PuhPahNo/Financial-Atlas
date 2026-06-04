@@ -22,8 +22,8 @@ from .metrics import summarize
 from .pit_fundamentals import as_of
 
 _DEFAULT_MAX_POSITIONS = 8
-_PIT_CAVEAT = ("Point-in-time entry — positions open only when the model's criteria were "
-               "met at that date, using data available then (no look-ahead).")
+# Point-in-time entry is just how a backtest must work, so it isn't flagged. The one
+# genuine remaining limitation worth noting is the user-specified universe (no survivorship).
 _UNIVERSE_CAVEAT = ("Candidate universe is user-specified; survivorship/selection bias is "
                     "not modeled (delisted names and historical index membership are absent).")
 
@@ -126,7 +126,7 @@ def run_screen_backtest(*, strategy: dict, tickers: list[str], start_date: date,
         raise ValidationError("At least one ticker is required")
 
     cost_rate = (transaction_cost_bps + slippage_bps) / 10000
-    warnings: list[str] = [_PIT_CAVEAT, _UNIVERSE_CAVEAT]
+    warnings: list[str] = [_UNIVERSE_CAVEAT]
 
     # Warm-up history before the window so SMA200 / momentum are established on day one.
     warmup_start = date(max(1962, start_date.year - 2), 1, 1)
