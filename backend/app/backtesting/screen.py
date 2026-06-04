@@ -260,3 +260,201 @@ def run_screen_backtest(*, strategy: dict, tickers: list[str], start_date: date,
         "residual_cash": residual_cash,
         "date_range": {"start": start_date, "end": end_date},
     }
+
+
+# --------------------------------------------------------------------------- #
+# Active screening over the full S&P 500 universe (PRD active-sp500-screening)  #
+# --------------------------------------------------------------------------- #
+
+def _pct(value, fallback: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return v / 100 if v > 1 else v
+
+
+def _load_window(sym: str, warmup_start: date, end_date: date) -> list[dict]:
+    payload, _ = prices.price_window(sym, start=warmup_start, end=end_date, interval="1d")
+    bars = [b for b in payload["bars"] if b.get("close") is not None]
+    bars.sort(key=lambda b: str(b["date"]))
+    return bars
+
+
+def warm_universe_for_backtests(universe: list[str] | None = None, *, end_date: date | None = None,
+                                years: int = 5, include_fundamentals: bool = True) -> dict:
+    """Best-effort pre-fetch of the universe's price windows (and, optionally, fundamentals)
+    so on-demand backtests read warm caches instead of making hundreds of cold fetches.
+    Intended for the existing in-process warm/refresh path — never raises. Returns counts."""
+    from .universe import sp500_tickers
+    universe = universe or sp500_tickers()
+    end_date = end_date or date.today()
+    warmup_start = date(max(1962, end_date.year - years), 1, 1)
+    prices_ok = funds_ok = 0
+    for t in universe:
+        try:
+            _load_window(t, warmup_start, end_date)
+            prices_ok += 1
+        except Exception:  # noqa: BLE001
+            pass
+        if include_fundamentals:
+            try:
+                if as_of(t, end_date) is not None:
+                    funds_ok += 1
+            except Exception:  # noqa: BLE001
+                pass
+    return {"universe": len(universe), "prices_warmed": prices_ok, "fundamentals_warmed": funds_ok}
+
+
+def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date, end_date: date,
+                        starting_cash: float, transaction_cost_bps: float = 5.0,
+                        slippage_bps: float = 5.0, benchmark: str = "SPY") -> dict:
+    """Actively manage the universe: each day, close positions that hit a take-profit /
+    stop-loss / max-hold / criteria-break, then fill any free slots with the best names that
+    *newly* meet the model's criteria (point-in-time). Hold at most top-N, equal-weighted."""
+    if end_date <= start_date:
+        raise ValidationError("Backtest end_date must be after start_date")
+    category = strategy.get("category") or "short_term"
+    params = strategy.get("parameters", {}) or {}
+    universe = sorted({t.strip().upper() for t in (universe or []) if t and t.strip()})
+    if not universe:
+        raise ValidationError("Active screening needs a non-empty universe")
+
+    cost_rate = (transaction_cost_bps + slippage_bps) / 10000
+    top_n = _max_positions(category, params)
+    if category != "risk_rotation":
+        try:
+            top_n = max(1, int(params.get("max_positions") or 15))
+        except (TypeError, ValueError):
+            top_n = 15
+    take_profit = _pct(params.get("take_profit_pct") or params.get("take_profit"), 0.25)
+    stop_loss = _pct(params.get("stop_loss_pct") or params.get("stop_loss"), 0.12)
+    max_hold = int(params.get("max_hold_days") or 252)
+    warnings: list[str] = [_UNIVERSE_CAVEAT]
+
+    warmup_start = date(max(1962, start_date.year - 2), 1, 1)
+    bars: dict[str, list[dict]] = {}
+    for t in universe:
+        try:
+            tb = _load_window(t, warmup_start, end_date)
+            if tb:
+                bars[t] = tb
+        except Exception:  # noqa: BLE001 — a missing/illiquid name is simply not investable
+            continue
+    if not bars:
+        raise ValidationError("No price history available for the universe in this window")
+
+    bench_bars: list[dict] = []
+    if benchmark:
+        try:
+            bench_bars = _load_window(benchmark, warmup_start, end_date)
+        except Exception:  # noqa: BLE001
+            warnings.append(f"Benchmark {benchmark.upper()} history was unavailable for this window.")
+
+    s_iso, e_iso = start_date.isoformat(), end_date.isoformat()
+    cal_set = {str(b["date"])[:10] for tb in bars.values() for b in tb if s_iso <= str(b["date"])[:10] <= e_iso}
+    calendar = [date.fromisoformat(ds) for ds in sorted(cal_set)]
+    if len(calendar) < 2:
+        raise ValidationError("Not enough trading days in the window")
+    bench_first = factors.close_on(bench_bars, calendar[0]) if bench_bars else None
+
+    def close(sym: str, d):
+        return factors.close_on(bars[sym], d)
+
+    cash = float(starting_cash)
+    positions: dict[str, dict] = {}
+    trades: list[dict] = []
+    equity_curve: list[dict] = []
+
+    def mark_equity(d) -> float:
+        return cash + sum(_leg_value(p, (close(t, d) or p["entry_price"])) for t, p in positions.items())
+
+    for d in calendar:
+        # 1) Exits — take-profit / stop-loss / max-hold / criteria-break, whichever first.
+        for t in list(positions):
+            p = positions[t]
+            px = close(t, d)
+            if px is None:
+                continue
+            gain = (px / p["entry_price"] - 1) if p["direction"] == "long" else (p["entry_price"] / px - 1)
+            held = (d - p["entry_date"]).days
+            reason = None
+            if gain >= take_profit:
+                reason = f"take-profit +{take_profit * 100:.0f}%"
+            elif gain <= -stop_loss:
+                reason = f"stop-loss -{stop_loss * 100:.0f}%"
+            elif held >= max_hold:
+                reason = f"max-hold {max_hold}d"
+            else:
+                ok, _, _ = eligible(category, params, t, d, bars[t], bench_bars)
+                if not ok:
+                    reason = "criteria exit"
+            if reason:
+                pnl = (p["qty"] * (px - p["entry_price"]) if p["direction"] == "long"
+                       else p["qty"] * (p["entry_price"] - px))
+                cash += pnl if p["direction"] == "short" else p["qty"] * px
+                cash -= p["qty"] * px * cost_rate
+                trades.append({"date": d, "ticker": t, "side": "cover" if p["direction"] == "short" else "sell",
+                               "quantity": p["qty"], "price": px, "value": abs(p["qty"] * px),
+                               "reason": reason, "pnl": pnl})
+                del positions[t]
+
+        # 2) Entries — fill free slots with the best newly-qualifying names.
+        if len(positions) < top_n:
+            equity_now = mark_equity(d)
+            target = max(0.0, equity_now) / top_n
+            cands = []
+            for t in bars:
+                if t in positions:
+                    continue
+                px = close(t, d)
+                if px is None or px <= 0:
+                    continue
+                ok, score, direction = eligible(category, params, t, d, bars[t], bench_bars)
+                if ok:
+                    cands.append((score, t, direction, px))
+            cands.sort(key=lambda x: x[0], reverse=True)
+            for score, t, direction, px in cands:
+                if len(positions) >= top_n:
+                    break
+                dollars = target if direction == "short" else min(target, cash)
+                if dollars <= 1:
+                    continue
+                qty = dollars / px
+                cash -= dollars if direction == "long" else 0.0
+                cash -= dollars * cost_rate
+                positions[t] = {"qty": qty, "direction": direction, "entry_price": px, "entry_date": d}
+                trades.append({"date": d, "ticker": t, "side": "short" if direction == "short" else "buy",
+                               "quantity": qty, "price": px, "value": dollars, "reason": "criteria met"})
+
+        # 3) Mark net liquidation.
+        eq = mark_equity(d)
+        point = {"date": d, "cash": cash, "equity": eq}
+        if bench_first:
+            bclose = factors.close_on(bench_bars, d)
+            point["benchmark_equity"] = starting_cash * ((bclose or bench_first) / bench_first)
+        equity_curve.append(point)
+
+    last_day = calendar[-1]
+    final_holdings = [{
+        "ticker": t, "quantity": p["qty"], "direction": p["direction"],
+        "entry_price": p["entry_price"], "last_close": (close(t, last_day) or p["entry_price"]),
+    } for t, p in positions.items()]
+    final_equity = equity_curve[-1]["equity"] if equity_curve else starting_cash
+    holdings = [{"ticker": t, "weight": round(abs(_leg_value(p, (close(t, last_day) or p["entry_price"]))) / final_equity, 4)}
+                for t, p in positions.items() if final_equity] or [{"ticker": "Cash", "weight": 1.0}]
+    if not trades:
+        warnings.append("No S&P 500 name met the model's criteria in this window — the model stayed in cash.")
+
+    return {
+        "strategy": strategy,
+        "served_by": "yahoo",
+        "trades": trades,
+        "equity_curve": equity_curve,
+        "metrics": summarize(equity_curve, trades, starting_cash),
+        "warnings": warnings,
+        "holdings": holdings,
+        "final_holdings": final_holdings,
+        "residual_cash": cash,
+        "date_range": {"start": start_date, "end": end_date},
+    }

@@ -81,19 +81,17 @@ def test_fundamental_gate_waits_for_filing(monkeypatch):
     assert all(t["date"] >= date(2021, 1, 1) for t in buys)  # never before the filing was known
 
 
-def test_real_backtest_routes_through_screening_with_universe_caveat():
-    """Real (non-fixture) backtests route through screening and carry the survivorship caveat.
-    Point-in-time entry is the expected default, so it is intentionally not flagged."""
+def test_real_backtest_routes_through_active_screening_with_universe_caveat(monkeypatch):
+    """Real (non-fixture) backtests route through the active S&P 500 screener and carry the
+    survivorship caveat. Point-in-time entry is the expected default, so it is not flagged."""
     start, end, hist0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
     import app.backtesting.screen as s
+    import app.backtesting.engine as eng
     series = {"AAA": _daily(hist0, end, lambda d: 100.0), "SPY": _daily(hist0, end, lambda d: 100.0)}
-    orig = s.prices.price_window
-    s.prices.price_window = _stub_prices(series)
-    try:
-        from app.backtesting.engine import run_backtest
-        res = run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
+    monkeypatch.setattr(s.prices, "price_window", _stub_prices(series))
+    monkeypatch.setattr(eng, "sp500_tickers", lambda: ["AAA"])  # avoid a network fetch in tests
+
+    res = eng.run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
                            tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)
-    finally:
-        s.prices.price_window = orig
     assert any("survivorship" in w.lower() for w in res["warnings"])
     assert not any("look-ahead" in w.lower() for w in res["warnings"])

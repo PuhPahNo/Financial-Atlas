@@ -22,7 +22,8 @@ from datetime import date, timedelta
 from ..core.errors import ValidationError
 from ..services import prices
 from .metrics import summarize
-from .screen import run_screen_backtest
+from .screen import run_active_backtest
+from .universe import sp500_tickers
 
 SP500_REFERENCE = "^GSPC"
 
@@ -372,12 +373,14 @@ def run_backtest(
     if not instrument:
         raise ValidationError("At least one ticker is required")
 
-    # Real catalogue (non-rule) strategies run through the point-in-time screening engine so
-    # entries are gated by the model's criteria as-of each date — no look-ahead, no day-1
-    # buy-and-hold of a hand-picked winner. Fixtures and rule-based models keep their paths.
+    # Real catalogue (non-rule) strategies are actively managed over the whole S&P 500: each
+    # day, scan the index and buy names that newly meet the model's criteria (point-in-time),
+    # exit on take-profit / stop-loss / max-hold / criteria-break. The model's own tickers are
+    # folded in as extra candidates. Fixtures and rule-based models keep their existing paths.
     if spec is None and not use_fixture_data:
-        return run_screen_backtest(
-            strategy=strategy, tickers=tickers, start_date=start_date, end_date=end_date,
+        universe = sorted(set(sp500_tickers()) | {t.strip().upper() for t in tickers if t and t.strip()})
+        return run_active_backtest(
+            strategy=strategy, universe=universe, start_date=start_date, end_date=end_date,
             starting_cash=starting_cash, transaction_cost_bps=transaction_cost_bps,
             slippage_bps=slippage_bps, benchmark=benchmark,
         )
