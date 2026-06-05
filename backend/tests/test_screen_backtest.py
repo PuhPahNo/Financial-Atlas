@@ -89,7 +89,8 @@ def test_real_backtest_routes_through_active_screening_with_universe_caveat(monk
     import app.backtesting.engine as eng
     series = {"AAA": _daily(hist0, end, lambda d: 100.0), "SPY": _daily(hist0, end, lambda d: 100.0)}
     monkeypatch.setattr(s.prices, "price_window", _stub_prices(series))
-    monkeypatch.setattr(eng, "sp500_tickers", lambda: ["AAA"])  # avoid a network fetch in tests
+    monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])   # avoid network fetches
+    monkeypatch.setattr(eng.univ, "members_on", lambda d: {"AAA"})
 
     res = eng.run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
                            tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)

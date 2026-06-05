@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     live_mark_enabled: bool = True
     live_mark_interval_seconds: int = 60
     live_quote_ttl_seconds: int = 60
+
+    # Backtests scan the S&P 500 as it was on each historical date (point-in-time membership
+    # reconstructed free from the published change-log). Set false to scan today's list only.
+    backtest_point_in_time_membership: bool = True
     # Reserved for the future paper-trading / backtesting phase (Alpaca).
     alpaca_api_key: str = ""
     alpaca_secret: str = ""

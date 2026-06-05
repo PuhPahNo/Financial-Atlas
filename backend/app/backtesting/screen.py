@@ -308,7 +308,7 @@ def warm_universe_for_backtests(universe: list[str] | None = None, *, end_date: 
 
 def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date, end_date: date,
                         starting_cash: float, transaction_cost_bps: float = 5.0,
-                        slippage_bps: float = 5.0, benchmark: str = "SPY") -> dict:
+                        slippage_bps: float = 5.0, benchmark: str = "SPY", membership_on=None) -> dict:
     """Actively manage the universe: each day, close positions that hit a take-profit /
     stop-loss / max-hold / criteria-break, then fill any free slots with the best names that
     *newly* meet the model's criteria (point-in-time). Hold at most top-N, equal-weighted."""
@@ -403,10 +403,13 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
         if len(positions) < top_n:
             equity_now = mark_equity(d)
             target = max(0.0, equity_now) / top_n
+            members = membership_on(d) if membership_on is not None else None
             cands = []
             for t in bars:
                 if t in positions:
                     continue
+                if members is not None and t not in members:
+                    continue  # not in the index on this date (point-in-time membership)
                 px = close(t, d)
                 if px is None or px <= 0:
                     continue

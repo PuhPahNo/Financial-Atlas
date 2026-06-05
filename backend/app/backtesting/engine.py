@@ -19,11 +19,12 @@ from __future__ import annotations
 import math
 from datetime import date, timedelta
 
+from ..core.config import settings
 from ..core.errors import ValidationError
 from ..services import prices
+from . import universe as univ
 from .metrics import summarize
 from .screen import run_active_backtest
-from .universe import sp500_tickers
 
 SP500_REFERENCE = "^GSPC"
 
@@ -378,11 +379,16 @@ def run_backtest(
     # exit on take-profit / stop-loss / max-hold / criteria-break. The model's own tickers are
     # folded in as extra candidates. Fixtures and rule-based models keep their existing paths.
     if spec is None and not use_fixture_data:
-        universe = sorted(set(sp500_tickers()) | {t.strip().upper() for t in tickers if t and t.strip()})
+        model_t = {t.strip().upper().replace(".", "-") for t in tickers if t and t.strip()}
+        superset = sorted(set(univ.investable_superset()) | model_t)
+        membership = None
+        if settings.backtest_point_in_time_membership:
+            etfs = {s.upper() for s in univ.ETF_UNIVERSE}
+            membership = lambda d: univ.members_on(d) | etfs | model_t  # noqa: E731
         return run_active_backtest(
-            strategy=strategy, universe=universe, start_date=start_date, end_date=end_date,
+            strategy=strategy, universe=superset, start_date=start_date, end_date=end_date,
             starting_cash=starting_cash, transaction_cost_bps=transaction_cost_bps,
-            slippage_bps=slippage_bps, benchmark=benchmark,
+            slippage_bps=slippage_bps, benchmark=benchmark, membership_on=membership,
         )
 
     warnings: list[str] = []

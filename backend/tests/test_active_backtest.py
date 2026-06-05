@@ -85,6 +85,28 @@ def test_never_holds_more_than_top_n(monkeypatch):
     assert len(res["final_holdings"]) <= 2
 
 
+def test_membership_blocks_nonmembers_before_join_date(monkeypatch):
+    """A name that qualifies technically is still not bought until it's an index member."""
+    start, end, h0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
+    rise = lambda d: 50 + 50 * ((d - h0).days / (end - h0).days)   # steady uptrend; both qualify
+    monkeypatch.setattr(screen.prices, "price_window",
+                        _stub({"OLD": _daily(h0, end, rise), "NEW": _daily(h0, end, rise),
+                               "SPY": _daily(h0, end, lambda d: 100.0)}))
+
+    def membership(d):  # NEW only joins the index on 2021-01-01
+        return {"OLD", "NEW"} if d >= date(2021, 1, 1) else {"OLD"}
+
+    res = run_active_backtest(
+        strategy={"category": "short_term", "name": "M",
+                  "parameters": {"max_positions": 5, "take_profit_pct": 0.99, "stop_loss_pct": 0.99}},
+        universe=["OLD", "NEW"], start_date=start, end_date=end, starting_cash=10000.0,
+        membership_on=membership)
+    new_buys = [t for t in res["trades"] if t["side"] == "buy" and t["ticker"] == "NEW"]
+    old_buys = [t for t in res["trades"] if t["side"] == "buy" and t["ticker"] == "OLD"]
+    assert new_buys and all(t["date"] >= date(2021, 1, 1) for t in new_buys)  # not bought pre-membership
+    assert old_buys and any(t["date"] < date(2021, 1, 1) for t in old_buys)   # OLD bought earlier
+
+
 def test_all_cash_when_nothing_qualifies(monkeypatch):
     start, end, h0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
     price = lambda d: 200 - 50 * ((d - h0).days / (end - h0).days)  # strictly declining
