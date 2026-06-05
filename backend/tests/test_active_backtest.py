@@ -107,6 +107,32 @@ def test_membership_blocks_nonmembers_before_join_date(monkeypatch):
     assert old_buys and any(t["date"] < date(2021, 1, 1) for t in old_buys)   # OLD bought earlier
 
 
+def test_dead_ticker_is_skiplisted_and_not_refetched(monkeypatch):
+    """A symbol that hard-errors is remembered, so the next backtest doesn't re-fetch it."""
+    start, end, h0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
+    rise = lambda d: 50 + 50 * ((d - h0).days / (end - h0).days)
+    live = _daily(h0, end, rise)
+    calls = {"DEAD": 0}
+
+    def pw(sym, *, start, end, interval="1d"):
+        if sym == "DEAD":
+            calls["DEAD"] += 1
+            raise RuntimeError("404 — delisted")
+        return {"bars": [b for b in {"LIVE": live, "SPY": _daily(h0, end, lambda d: 100.0)}.get(sym, [])
+                         if start.isoformat() <= b["date"] <= end.isoformat()], "currency": "USD"}, "stub"
+
+    store: dict = {}
+    monkeypatch.setattr(screen.cache, "peek", lambda ns, k, ttl: store.get((ns, k)))
+    monkeypatch.setattr(screen.cache, "put", lambda ns, k, v: store.__setitem__((ns, k), v))
+    monkeypatch.setattr(screen.prices, "price_window", pw)
+
+    strat = {"category": "short_term", "name": "X", "parameters": {"take_profit_pct": 0.99, "stop_loss_pct": 0.99}}
+    screen.run_active_backtest(strategy=strat, universe=["LIVE", "DEAD"], start_date=start, end_date=end, starting_cash=10000.0)
+    assert calls["DEAD"] == 1 and store.get(("dead_ticker", "DEAD")) is True  # errored once, now skiplisted
+    screen.run_active_backtest(strategy=strat, universe=["LIVE", "DEAD"], start_date=start, end_date=end, starting_cash=10000.0)
+    assert calls["DEAD"] == 1  # second run skipped it entirely — no re-fetch
+
+
 def test_all_cash_when_nothing_qualifies(monkeypatch):
     start, end, h0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
     price = lambda d: 200 - 50 * ((d - h0).days / (end - h0).days)  # strictly declining

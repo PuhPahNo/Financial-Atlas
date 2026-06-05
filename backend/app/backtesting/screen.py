@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from ..core import cache
 from ..core.errors import ValidationError
 from ..services import prices
 from . import factors
@@ -22,6 +23,19 @@ from .metrics import summarize
 from .pit_fundamentals import as_of
 
 _DEFAULT_MAX_POSITIONS = 8
+
+# Dead-ticker skiplist: symbols whose price fetch hard-errors (404 / unresolved — typically
+# delisted names in the historical superset) are remembered so the engine stops re-fetching
+# corpses on every backtest. Short TTL so a transient error self-heals.
+_DEAD_TTL = 7 * 86400
+
+
+def _is_dead(ticker: str) -> bool:
+    return cache.peek("dead_ticker", ticker.upper(), _DEAD_TTL) is True
+
+
+def _mark_dead(ticker: str) -> None:
+    cache.put("dead_ticker", ticker.upper(), True)
 # Point-in-time entry is just how a backtest must work, so it isn't flagged. The one
 # genuine remaining limitation worth noting is the user-specified universe (no survivorship).
 _UNIVERSE_CAVEAT = ("Candidate universe is user-specified; survivorship/selection bias is "
@@ -292,11 +306,14 @@ def warm_universe_for_backtests(universe: list[str] | None = None, *, end_date: 
     warmup_start = date(max(1962, end_date.year - years), 1, 1)
     prices_ok = funds_ok = 0
     for t in universe:
+        if _is_dead(t):
+            continue
         try:
             _load_window(t, warmup_start, end_date)
             prices_ok += 1
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001 — unresolved symbol → skiplist so we stop re-fetching it
+            _mark_dead(t)
+            continue
         if include_fundamentals:
             try:
                 if as_of(t, end_date) is not None:
@@ -335,11 +352,14 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
     warmup_start = date(max(1962, start_date.year - 2), 1, 1)
     bars: dict[str, list[dict]] = {}
     for t in universe:
+        if _is_dead(t):
+            continue  # known no-data symbol — don't re-fetch corpses
         try:
             tb = _load_window(t, warmup_start, end_date)
             if tb:
                 bars[t] = tb
-        except Exception:  # noqa: BLE001 — a missing/illiquid name is simply not investable
+        except Exception:  # noqa: BLE001 — symbol won't resolve (often delisted) → skiplist it
+            _mark_dead(t)
             continue
     if not bars:
         raise ValidationError("No price history available for the universe in this window")

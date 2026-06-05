@@ -118,6 +118,23 @@ def _write(path: Path, payload: dict) -> None:
         raise
 
 
+def peek(namespace: str, key: str, ttl_seconds: int) -> Any | None:
+    """Return a cached value if present and fresh, else None — without invoking a loader.
+    Used for lightweight flags (e.g. a dead-ticker skiplist)."""
+    if not settings.cache_enabled:
+        return None
+    record = _read(_path_for(namespace, key))
+    if record is not None and time.time() - record.get("stored_at", 0) <= ttl_seconds:
+        return record["value"]
+    return None
+
+
+def put(namespace: str, key: str, value: Any) -> None:
+    """Write a value to the cache directly (no loader). Counterpart to ``peek``."""
+    if settings.cache_enabled:
+        _write(_path_for(namespace, key), {"stored_at": time.time(), "value": value})
+
+
 def get_or_set(namespace: str, key: str, ttl_seconds: int, loader: Callable[[], Any]) -> CacheResult:
     """Return cached value if fresh, else call ``loader`` and cache it.
 
