@@ -59,8 +59,10 @@ export default function PaperTradingPage() {
     [strategies, favorites]
   );
 
-  // Quietly backtest any not-yet-backtested models in the background (3 at a time)
-  // so every card shows real equity without the user opening each one.
+  // Quietly backtest any not-yet-backtested models in the background, ONE AT A TIME, so
+  // every card shows real equity without the user opening each one. Each backtest now scans
+  // the whole S&P 500 universe, so running several at once blows past the instance's memory
+  // limit — a single sequential worker (plus server-side serialization) keeps it safe.
   const warmedRef = useRef(false);
   useEffect(() => {
     if (loading || warmedRef.current) return;
@@ -77,10 +79,11 @@ export default function PaperTradingPage() {
             strategy_id: m.id, tickers: m.parameters?.tickers ?? [],
             start_date: w.start, end_date: w.end, starting_cash: 100000, benchmark: "SPY", persist_headline: true,
           });
+          refresh();  // reflect each card as it finishes
         } catch { /* leave illustrative on failure */ }
       }
     };
-    Promise.all([worker(), worker(), worker()]).then(() => refresh());
+    worker().then(() => refresh());
   }, [loading, models, refresh]);
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2600); };

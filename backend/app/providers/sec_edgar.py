@@ -154,7 +154,10 @@ class SecEdgarProvider:
             return get_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json", headers=_UA, provider=self.name)
 
         data = cache.get_or_set("edgar", f"facts:{cik}", ttl_seconds=7 * 86400, loader=load).value
-        if len(_FACTS_MEM) > 40:  # simple bound
+        # Each parsed companyfacts is large (raw ~3.7MB, much bigger in RAM). Keep only a
+        # few in memory at once — a universe-wide backtest touches hundreds of tickers, and
+        # holding 40 parsed-facts blobs was a primary cause of 512MB OOM kills.
+        if len(_FACTS_MEM) >= 4:
             _FACTS_MEM.clear()
         _FACTS_MEM[cik] = data
         return data

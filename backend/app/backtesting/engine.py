@@ -381,6 +381,9 @@ def run_backtest(
     if spec is None and not use_fixture_data:
         model_t = {t.strip().upper().replace(".", "-") for t in tickers if t and t.strip()}
         superset = sorted(set(univ.investable_superset()) | model_t)
+        cap = settings.backtest_universe_max
+        if cap and cap > 0 and len(superset) > cap:  # safety backstop (0 = unlimited)
+            superset = sorted(model_t | set(superset[:cap]))
         membership = None
         if settings.backtest_point_in_time_membership:
             etfs = {s.upper() for s in univ.ETF_UNIVERSE}

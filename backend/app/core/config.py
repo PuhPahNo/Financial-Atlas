@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Backtests scan the S&P 500 as it was on each historical date (point-in-time membership
     # reconstructed free from the published change-log). Set false to scan today's list only.
     backtest_point_in_time_membership: bool = True
+    # Safety backstop on how many tickers a single backtest scans (0 = unlimited). The engine
+    # is memory-lean enough for the full universe on 512MB, but this caps a pathological run.
+    backtest_universe_max: int = 0
     # Reserved for the future paper-trading / backtesting phase (Alpaca).
     alpaca_api_key: str = ""
     alpaca_secret: str = ""

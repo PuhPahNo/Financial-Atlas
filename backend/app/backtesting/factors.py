@@ -6,11 +6,42 @@ information can leak into a historical decision. ``bars`` is a list of dicts wit
 """
 from __future__ import annotations
 
+import bisect
 from datetime import date
 
 
 def _iso(d) -> str:
     return d.isoformat() if isinstance(d, date) else str(d)[:10]
+
+
+# --------------------------------------------------------------------------- #
+# Compact-series factors (PRD oom-fix): operate on parallel arrays
+# ``dates: list[str]`` (ascending) + ``closes: list[float]`` instead of a fat
+# list-of-dicts. ~5–10× less memory, which is what lets a full S&P 500 scan fit
+# in a 512MB instance. ``k`` is the count of bars dated on/before the eval date
+# (closes[:k] are visible), found once per evaluation via bisect.
+# --------------------------------------------------------------------------- #
+
+def idx_asof(dates: list[str], D) -> int:
+    """Count of bars with date <= D (so closes[:idx] are the point-in-time visible closes)."""
+    return bisect.bisect_right(dates, _iso(D))
+
+
+def close_at(dates: list[str], closes: list[float], D) -> float | None:
+    k = bisect.bisect_right(dates, _iso(D))
+    return closes[k - 1] if k > 0 else None
+
+
+def sma_at(closes: list[float], k: int, n: int) -> float | None:
+    if n <= 0 or k < n:
+        return None
+    return sum(closes[k - n:k]) / n
+
+
+def momentum_at(closes: list[float], k: int, lookback: int) -> float | None:
+    if lookback <= 0 or k <= lookback or closes[k - 1 - lookback] == 0:
+        return None
+    return closes[k - 1] / closes[k - 1 - lookback] - 1
 
 
 def _closes_upto(bars: list[dict], D) -> list[float]:
