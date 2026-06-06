@@ -27,9 +27,12 @@ class Settings(BaseSettings):
     # SEC requires a descriptive User-Agent with contact info (PRD 02 §7).
     sec_user_agent: str = "Financial Atlas you@example.com"
 
-    # Cache (PRD 05). Filesystem locally.
+    # Cache (PRD 05). Filesystem locally; point CACHE_DIR at a mounted disk in production
+    # to persist across restarts. CACHE_MAX_MB caps the on-disk size (0 = unlimited) so a
+    # small disk can't overflow with raw EDGAR companyfacts.
     cache_dir: Path = BACKEND_ROOT / ".cache"
     cache_enabled: bool = True
+    cache_max_mb: int = 0
 
     # Database (PRD 03). SQLite locally -> Postgres on Render via DATABASE_URL.
     database_url: str = f"sqlite:///{BACKEND_ROOT / 'atlas.db'}"

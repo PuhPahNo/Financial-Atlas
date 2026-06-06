@@ -2,7 +2,7 @@ import pytest
 
 from app.core.rate_limit import reset_rate_limits
 from app.db import session_scope
-from app.db import CompanySnapshot, Watchlist, WatchlistItem
+from app.db import CompanySnapshot, PitFundamental, Watchlist, WatchlistItem
 from app.models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
 from app.models.paper_trading import BacktestRun, PaperPortfolio, TraderAccount, TradingStrategy
 from app.models.valuation import ValuationResult
@@ -98,6 +98,7 @@ def cleanup_feature_test_records():
             session.delete(assistant_session)
         session.query(ValuationResult).filter(ValuationResult.ticker.in_(["TST", "NEG"])).delete(synchronize_session=False)
         session.query(CompanySnapshot).filter(CompanySnapshot.ticker.in_(["AAA", "BBB", "CCC", "FAIL"])).delete(synchronize_session=False)
+        session.query(PitFundamental).filter(PitFundamental.ticker.in_(["X", "AAA", "BBB"])).delete(synchronize_session=False)
         watchlists = session.query(Watchlist).filter(Watchlist.name.in_(["Test Warm Watchlist"])).all()
         for watchlist in watchlists:
             session.delete(watchlist)

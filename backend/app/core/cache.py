@@ -101,6 +101,49 @@ def _read(path: Path) -> dict | None:
         return None
 
 
+_write_count = 0
+
+
+def _maybe_prune() -> None:
+    """Bound the on-disk cache so a persistent disk can't overflow (e.g. raw EDGAR
+    companyfacts piling up). When the cache dir exceeds ``cache_max_mb``, delete the
+    oldest files until back under 90% of the cap. Runs only every Nth write to stay cheap.
+    ``cache_max_mb=0`` disables the cap (default)."""
+    global _write_count
+    cap_mb = getattr(settings, "cache_max_mb", 0) or 0
+    if cap_mb <= 0:
+        return
+    _write_count += 1
+    if _write_count % 200 != 0:
+        return
+    root = settings.cache_dir
+    try:
+        entries = []
+        total = 0
+        for p in root.rglob("*.json"):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            entries.append((st.st_mtime, st.st_size, p))
+            total += st.st_size
+        limit = cap_mb * 1024 * 1024
+        if total <= limit:
+            return
+        target = int(limit * 0.9)
+        entries.sort()  # oldest first
+        for _mtime, size, p in entries:
+            if total <= target:
+                break
+            try:
+                p.unlink()
+                total -= size
+            except OSError:
+                pass
+    except Exception:  # noqa: BLE001 — pruning is best-effort, never break a write
+        pass
+
+
 def _write(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Unique temp file per write so concurrent writers to the same key don't
@@ -116,6 +159,7 @@ def _write(path: Path, payload: dict) -> None:
         except OSError:
             pass
         raise
+    _maybe_prune()
 
 
 def peek(namespace: str, key: str, ttl_seconds: int) -> Any | None:

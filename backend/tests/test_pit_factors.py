@@ -27,6 +27,8 @@ def test_as_of_respects_filing_dates(monkeypatch):
     monkeypatch.setattr(pit.sec_edgar, "get_cash_flows", lambda t, **k: [cf_new, cf_old])
     monkeypatch.setattr(pit.sec_edgar, "get_income_statements", lambda t, **k: [])
     monkeypatch.setattr(pit.sec_edgar, "get_balance_sheets", lambda t, **k: [])
+    pit._ROWS_MEM.clear()
+    pit._ATTEMPTED.discard("X")
 
     # Mid-2020: only the FY2019 10-K (filed 2020-02-15) was known.
     f = pit.as_of("X", date(2020, 6, 1))

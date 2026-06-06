@@ -70,6 +70,30 @@ class CompanySnapshot(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class PitFundamental(Base):
+    """Precomputed point-in-time fundamentals (one row per ticker per annual filing).
+
+    Extracted once from EDGAR companyfacts and stored compactly so backtests scanning the
+    whole S&P 500 read tiny DB rows instead of re-parsing ~3.7MB of XBRL per ticker. The
+    ``filing_date`` is the as-of gate (a row is "known" only on/after it)."""
+    __tablename__ = "pit_fundamentals"
+    __table_args__ = (UniqueConstraint("ticker", "fiscal_year", name="uq_pit_ticker_fy"),)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String, nullable=False, index=True)
+    fiscal_year = Column(Integer, nullable=False)
+    filing_date = Column(String)  # ISO date the figures were first filed
+    fcf = Column(Float)
+    revenue = Column(Float)
+    operating_cash_flow = Column(Float)
+    fcf_margin = Column(Float)
+    fcf_conversion = Column(Float)
+    net_debt = Column(Float)
+    net_debt_to_fcf = Column(Float)
+    dividends_paid = Column(Float)
+    shares = Column(Float)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
 class Watchlist(Base):
     __tablename__ = "watchlists"
     id = Column(Integer, primary_key=True, autoincrement=True)
