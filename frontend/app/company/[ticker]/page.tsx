@@ -48,13 +48,13 @@ export default function OverviewPage() {
               <div className="text-xs uppercase tracking-[0.14em] text-accent-2">
                 {[company.profile.exchange, company.profile.industry].filter(Boolean).join(" · ") || "—"}
               </div>
-              <h1 className="mt-2 font-serif text-4xl font-semibold tracking-tightest">{company.profile.name ?? ticker}</h1>
+              <h1 className="mt-2 font-serif text-2xl font-semibold tracking-tightest sm:text-4xl">{company.profile.name ?? ticker}</h1>
               <div className="mt-2 font-mono text-sm text-muted">{ticker}</div>
             </div>
             <div className="flex items-end gap-5">
               {closes.length > 1 && <div className="hidden h-12 w-32 sm:block"><Sparkline data={closes} height={48} /></div>}
               <div className="text-right">
-                <div className="font-mono text-4xl font-medium tracking-tightest">{price(km?.price)}</div>
+                <div className="font-mono text-3xl font-medium tracking-tightest sm:text-4xl">{price(km?.price)}</div>
                 <div className={`mt-1 font-mono text-sm ${signClass(km?.change_abs)}`}>
                   {money(km?.change_abs, { sign: true })} ({pct(km?.change_pct, 2)})
                 </div>

@@ -51,7 +51,7 @@ export default function Builder({ seed, cats, onSave, onCancel }: {
   return (
    <div style={{ animation: "pt-fadeUp .3s var(--ease)" }}>
     {toggle}
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0.95fr)", gap: 26, alignItems: "start" }}>
+    <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0.95fr)", gap: 26, alignItems: "start" }}>
       <div className="card" style={{ padding: 26 }}>
         <h3 className="serif" style={{ margin: "0 0 4px", fontSize: 23, fontWeight: 600 }}>{seed ? "Tune model" : "Design an algorithm"}</h3>
         <p style={{ margin: "0 0 24px", fontSize: 13.5, color: "var(--text-2)" }}>Adjust the knobs — the projection on the right recomputes live.</p>
@@ -99,7 +99,7 @@ export default function Builder({ seed, cats, onSave, onCancel }: {
             <Pill tone={up ? "pos" : "neg"}>{fmt.pct(seriesPct(proj.series))}</Pill>
           </div>
           <AreaChart series={proj.series} color={cat.hue} height={170} uid="builder" animate={false} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 16 }}>
+          <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 16 }}>
             <Stat label="CAGR" value={fmt.pct(proj.cagr)} tone="pos" />
             <Stat label="Sharpe" value={proj.sharpe.toFixed(2)} />
             <Stat label="Max DD" value={proj.maxDD.toFixed(1) + "%"} tone="neg" />

@@ -287,7 +287,7 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
             {result.stats.winRate > 0 && <Tile label="Win rate" value={result.stats.winRate.toFixed(0) + "%"} />}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)", gap: 18 }}>
+          <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)", gap: 18 }}>
             <div className="card" style={{ overflow: "hidden" }}>
               <div style={{ padding: "15px 18px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span className="eyebrow">Simulated trades</span>

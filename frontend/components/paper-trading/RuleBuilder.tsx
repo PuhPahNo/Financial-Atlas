@@ -42,7 +42,7 @@ export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
   const valid = issues.length === 0;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0.92fr)", gap: 26, alignItems: "start", animation: "pt-fadeUp .3s var(--ease)" }}>
+    <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0.92fr)", gap: 26, alignItems: "start", animation: "pt-fadeUp .3s var(--ease)" }}>
       <div className="card" style={{ padding: 26 }}>
         <h3 className="serif" style={{ margin: "0 0 4px", fontSize: 23, fontWeight: 600 }}>{seed ? "Tune signal rule" : "Design a signal rule"}</h3>
         <p style={{ margin: "0 0 24px", fontSize: 13.5, color: "var(--text-2)" }}>Define a trigger and exits — Atlas will backtest it bar-by-bar on real prices.</p>
@@ -133,7 +133,7 @@ export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
           <div className="eyebrow" style={{ marginBottom: 12 }}>Strategy in plain English</div>
           <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "var(--text-1)" }}>{ruleSummary(rule)}</p>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 20 }}>
+          <div className="m-grid-1" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 20 }}>
             <div style={{ padding: "12px 14px", background: "var(--pos-soft)", borderRadius: "var(--r-sm)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--pos)", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}><Icon name="target" size={13} /> Take profit</div>
               <div className="mono" style={{ fontSize: 20, fontWeight: 600, color: "var(--pos)" }}>+{rule.takeProfit}%</div>

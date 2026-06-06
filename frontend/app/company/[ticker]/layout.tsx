@@ -26,7 +26,7 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
 
   return (
     <div>
-      <nav className="mb-7 flex gap-7 border-b border-line">
+      <nav className="no-scrollbar mb-6 flex gap-5 overflow-x-auto whitespace-nowrap border-b border-line sm:mb-7 sm:gap-7">
         {TABS.map((t) => {
           const href = `${base}${t.path}`;
           const active = pathname === href || (t.path === "" && pathname === base);
@@ -34,7 +34,7 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
             <Link
               key={t.label}
               href={href}
-              className={`-mb-px border-b-2 pb-3 text-sm transition-colors ${
+              className={`-mb-px shrink-0 border-b-2 pb-3 text-sm transition-colors ${
                 active ? "border-accent text-text" : "border-transparent text-muted hover:text-text"
               }`}
             >

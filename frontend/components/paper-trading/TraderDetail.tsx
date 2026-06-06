@@ -125,7 +125,7 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+            <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
               <Tile label="Total return" value={fmt.pct(perf.total_return * 100)} tone={up ? "pos" : "neg"} />
               <Tile label="vs S&P 500" value={fmt.pct(perf.alpha * 100)} tone={beat ? "pos" : "neg"} />
               <Tile label="Max DD" value={(perf.max_drawdown * 100).toFixed(1) + "%"} tone="neg" />
@@ -135,7 +135,7 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
             {perf.risk && (
               <section>
                 <div className="eyebrow" style={{ marginBottom: 12 }}>Risk dashboard</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 12 }}>
+                <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 12 }}>
                   <Tile label="Exposure" value={(perf.risk.gross_exposure * 100).toFixed(0) + "%"} />
                   <Tile label="Concentration" value={(perf.risk.concentration * 100).toFixed(0) + "%"} />
                   <Tile label="Turnover" value={perf.risk.turnover.toFixed(2) + "x"} />

@@ -24,7 +24,7 @@ export default function Dashboard() {
       {/* Hero — search is the centerpiece */}
       <div className="flex flex-col items-center gap-7 pb-2 pt-10 text-center">
         <div>
-          <h1 className="font-serif text-5xl font-semibold tracking-tightest">Good to see you.</h1>
+          <h1 className="font-serif text-3xl font-semibold tracking-tightest sm:text-5xl">Good to see you.</h1>
           <p className="mt-3 text-muted">Search any company — or dive into your picks and the market below.</p>
         </div>
         <div className="w-full max-w-2xl">

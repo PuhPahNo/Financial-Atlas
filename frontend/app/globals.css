@@ -101,3 +101,45 @@ body {
 @keyframes pt-fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pt-drawLine { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
 @keyframes pt-spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   Mobile responsiveness (Atlas)
+   Class-based layout uses Tailwind sm:/md: prefixes. The Paper Trading views
+   use inline styles, which a normal stylesheet can't override — but a rule
+   marked !important DOES beat a non-important inline style, so the helpers
+   below collapse those inline grids/sidebar on small screens. Add the class
+   alongside the existing inline style; desktop keeps the inline value.
+   ============================================================ */
+
+/* Hide scrollbars on horizontal nav/tab strips (still scrollable by touch). */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+@media (max-width: 680px) {
+  .m-grid-2 { grid-template-columns: repeat(2, 1fr) !important; }
+  .m-grid-1 { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 760px) {
+  /* Two-column form/preview layouts → single column. */
+  .m-stack { grid-template-columns: 1fr !important; }
+
+  /* Paper Trading shell: vertical sidebar → a horizontal, scrollable top nav strip. */
+  .pt-shell { grid-template-columns: 1fr !important; }
+  .pt-aside {
+    position: static !important;
+    height: auto !important;
+    flex-direction: row !important;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 12px !important;
+    gap: 10px !important;
+    scrollbar-width: none;
+  }
+  .pt-aside::-webkit-scrollbar { display: none; }
+  .pt-aside .pt-navlist { flex-direction: row !important; gap: 6px !important; flex-wrap: nowrap; }
+  .pt-aside .pt-navlist button { width: auto !important; white-space: nowrap; flex-shrink: 0; }
+  .pt-desk { display: none !important; }   /* hide the tall "paper desk" card on mobile */
+}

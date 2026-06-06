@@ -139,14 +139,14 @@ export default function PaperTradingPage() {
   const detailCat = detail ? cats.find((c) => c.id === detail.category) : undefined;
 
   return (
-    <div className="pt-scope" style={{ display: "grid", gridTemplateColumns: "240px minmax(0,1fr)", minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font-sans)" }}>
-      <aside style={{ borderRight: "1px solid var(--border)", padding: "24px 18px", display: "flex", flexDirection: "column", gap: 24, position: "sticky", top: 0, height: "100vh", boxSizing: "border-box" }}>
+    <div className="pt-scope pt-shell" style={{ display: "grid", gridTemplateColumns: "240px minmax(0,1fr)", minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font-sans)" }}>
+      <aside className="pt-aside" style={{ borderRight: "1px solid var(--border)", padding: "24px 18px", display: "flex", flexDirection: "column", gap: 24, position: "sticky", top: 0, height: "100vh", boxSizing: "border-box" }}>
         <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "var(--text-1)" }} title="Back to Atlas">
           <AtlasMark size={30} />
           <span className="serif" style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em" }}>Atlas</span>
         </Link>
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <nav className="pt-navlist" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {NAV.map((n) => {
             const active = view === n.id;
             return (
@@ -159,7 +159,7 @@ export default function PaperTradingPage() {
           })}
         </nav>
 
-        <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="pt-desk" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
           <button onClick={() => setView("traders")} className="card" style={{ padding: 16, background: "var(--surface-2)", textAlign: "left", cursor: "pointer", border: "1px solid var(--border)" }}>
             <div className="eyebrow" style={{ marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>Paper desk <Icon name="users" size={13} /></div>
             {accounts.length > 0 ? (
@@ -189,7 +189,7 @@ export default function PaperTradingPage() {
         ) : (
           <div style={{ maxWidth: 1180, margin: "0 auto" }}>
             <div style={{ marginBottom: 28 }}>
-              <h1 className="serif" style={{ margin: 0, fontSize: 38, fontWeight: 600, letterSpacing: "-0.02em" }}>{cur.title}</h1>
+              <h1 className="serif" style={{ margin: 0, fontSize: "clamp(26px, 5.5vw, 38px)", fontWeight: 600, letterSpacing: "-0.02em" }}>{cur.title}</h1>
               <p style={{ margin: "6px 0 0", color: "var(--text-2)", fontSize: 15 }}>{cur.sub}</p>
             </div>
 

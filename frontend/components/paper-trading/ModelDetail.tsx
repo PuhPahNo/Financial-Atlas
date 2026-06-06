@@ -106,7 +106,7 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+        <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
           <StatBox label="Return" value={fmt.pct(stats.cagr)} tone={stats.cagr >= 0 ? "pos" : "neg"} />
           <StatBox label="Sharpe" value={stats.sharpe.toFixed(2)} />
           <StatBox label="Max DD" value={stats.maxDD.toFixed(1) + "%"} tone="neg" />

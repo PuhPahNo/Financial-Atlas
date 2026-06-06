@@ -84,7 +84,7 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div className="m-grid-1" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Starting capital</div>
               <TextInput mono value={cash} onChange={(v) => setCash(Math.max(1000, parseInt(v.replace(/\D/g, "") || "0", 10)))} />

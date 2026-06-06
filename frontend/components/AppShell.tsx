@@ -14,8 +14,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <NavBar />
-      <main className="mx-auto max-w-[1180px] px-7 py-7">{children}</main>
-      <footer className="mx-auto max-w-[1180px] px-7 py-10 text-xs text-faint">
+      <main className="mx-auto max-w-[1180px] px-4 py-6 sm:px-7 sm:py-7">{children}</main>
+      <footer className="mx-auto max-w-[1180px] px-4 py-10 text-xs text-faint sm:px-7">
         Data: SEC EDGAR · Yahoo Finance · FMP · Finnhub. Research tool — not financial advice. Fair values are model outputs.
       </footer>
     </>
