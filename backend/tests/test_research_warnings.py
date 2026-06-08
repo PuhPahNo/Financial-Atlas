@@ -57,6 +57,7 @@ def test_finnhub_peers_enriched_with_name_and_market_cap(monkeypatch):
     # so the table renders fully instead of a column of dashes.
     from app.providers.base import Quote
 
+    monkeypatch.setattr(research.cache.settings, "cache_enabled", False)
     monkeypatch.setattr(research.fmp, "key", "fixture")
     monkeypatch.setattr(research.finnhub, "key", "fixture")
     monkeypatch.setattr(research.fmp, "get_peers", lambda _t: [])  # premium / empty
@@ -72,6 +73,28 @@ def test_finnhub_peers_enriched_with_name_and_market_cap(monkeypatch):
     assert peer["name"] == "Microsoft Corp"
     assert peer["market_cap"] == 3_000_000_000_000
     assert result["warnings"] == []
+
+
+def test_peer_market_cap_cached_to_protect_fmp_quota(monkeypatch, tmp_path):
+    # The 12h peer-market-cap cache must spare FMP's free quota: a second lookup
+    # within the window hits the cache, not the API.
+    from app.providers.base import Quote
+
+    monkeypatch.setattr(research.cache.settings, "cache_dir", tmp_path)
+    monkeypatch.setattr(research.cache.settings, "cache_enabled", True)
+    monkeypatch.setattr(research.fmp, "key", "fixture")
+
+    calls = {"n": 0}
+
+    def counting_quote(_t):
+        calls["n"] += 1
+        return Quote(price=400.0, market_cap=3_000_000_000_000)
+
+    monkeypatch.setattr(research.fmp, "get_quote", counting_quote)
+
+    assert research._peer_market_cap("MSFT") == 3_000_000_000_000
+    assert research._peer_market_cap("MSFT") == 3_000_000_000_000
+    assert calls["n"] == 1  # second call served from cache, no extra FMP request
 
 
 def test_analyst_drops_fmp_note_when_finnhub_rating_available(monkeypatch):

@@ -7,10 +7,16 @@ from __future__ import annotations
 
 import logging
 
+from ..core import cache
 from ..providers.registry import finnhub, fmp, sec_edgar
 from . import screener
 
 log = logging.getLogger(__name__)
+
+# Peer comparison context tolerates a day-stale market cap, so cache it far longer
+# than the 60s live-quote TTL — otherwise enriching ~8 peers on every page view
+# would churn through FMP's free daily request quota (~250/day).
+_PEER_MARKET_CAP_TTL = 12 * 3600
 
 
 def _peer_name(ticker: str) -> str | None:
@@ -22,13 +28,22 @@ def _peer_name(ticker: str) -> str | None:
 
 
 def _peer_market_cap(ticker: str) -> float | None:
-    """Market cap from FMP's free quote endpoint (best-effort, short-cached)."""
+    """Market cap from FMP's free quote endpoint, cached ~half a day so peer
+    enrichment can't burn FMP's free daily quota. Only successful values are
+    cached, so a transient failure isn't sticky for 12 hours."""
     if not fmp.enabled:
         return None
+    key = ticker.upper()
+    cached = cache.peek("peer_mktcap", key, ttl_seconds=_PEER_MARKET_CAP_TTL)
+    if cached is not None:
+        return cached
     try:
-        return fmp.get_quote(ticker).market_cap
+        market_cap = fmp.get_quote(ticker).market_cap
     except Exception:
         return None
+    if market_cap is not None:
+        cache.put("peer_mktcap", key, market_cap)
+    return market_cap
 
 
 def _enrich_peers(tickers: list[str]) -> list[dict]:
