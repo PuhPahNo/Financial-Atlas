@@ -29,10 +29,12 @@ class Settings(BaseSettings):
 
     # Cache (PRD 05). Filesystem locally; point CACHE_DIR at a mounted disk in production
     # to persist across restarts. CACHE_MAX_MB caps the on-disk size (0 = unlimited) so a
-    # small disk can't overflow with raw EDGAR companyfacts.
+    # small disk can't overflow with raw EDGAR companyfacts (~3.7MB each). Defaults to a
+    # conservative cap because an unbounded cache filled small ephemeral disks and made
+    # writes raise OSError; raise it when CACHE_DIR points at a large mounted disk.
     cache_dir: Path = BACKEND_ROOT / ".cache"
     cache_enabled: bool = True
-    cache_max_mb: int = 0
+    cache_max_mb: int = 512
 
     # Database (PRD 03). SQLite locally -> Postgres on Render via DATABASE_URL.
     database_url: str = f"sqlite:///{BACKEND_ROOT / 'atlas.db'}"

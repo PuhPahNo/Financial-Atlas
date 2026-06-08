@@ -52,6 +52,28 @@ def test_get_or_set_serves_stale_cache_when_refresh_fails():
     assert events[0].status == "stale"
 
 
+def test_get_or_set_serves_uncached_when_disk_write_fails(monkeypatch):
+    # A full/read-only disk (OSError on write) must not sink the request: we already
+    # have the loaded value, so return it uncached rather than propagating the error.
+    def boom(*_a, **_k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(cache, "_write", boom)
+
+    with cache.trace_events() as events:
+        result = cache.get_or_set("unit", "disk-full", ttl_seconds=60, loader=lambda: {"value": "live"})
+
+    assert result.value == {"value": "live"}
+    assert result.status == "bypass"  # not persisted
+    assert result.stored_at is None
+    assert events[0].status == "bypass"
+
+
+def test_put_swallows_disk_write_error(monkeypatch):
+    monkeypatch.setattr(cache, "_write", lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")))
+    cache.put("unit", "skiplist", {"dead": True})  # must not raise
+
+
 def test_get_or_set_single_flight_deduplicates_concurrent_loaders():
     calls = 0
     lock = threading.Lock()

@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 import hashlib
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -21,6 +22,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 # Per-key locks for single-flight: only one thread fetches a given key at a time;
 # concurrent callers wait and then read the freshly-written value.
@@ -97,7 +100,9 @@ def _read(path: Path) -> dict | None:
     try:
         with path.open("r", encoding="utf-8") as fh:
             return json.load(fh)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError):
+        # Missing file, unreadable mount, or corrupt JSON — treat as a cache miss.
+        # (FileNotFoundError is an OSError subclass.)
         return None
 
 
@@ -176,7 +181,10 @@ def peek(namespace: str, key: str, ttl_seconds: int) -> Any | None:
 def put(namespace: str, key: str, value: Any) -> None:
     """Write a value to the cache directly (no loader). Counterpart to ``peek``."""
     if settings.cache_enabled:
-        _write(_path_for(namespace, key), {"stored_at": time.time(), "value": value})
+        try:
+            _write(_path_for(namespace, key), {"stored_at": time.time(), "value": value})
+        except OSError as exc:  # full/read-only disk — caching is best-effort, never fatal
+            logger.warning("cache put failed (%s): %s", type(exc).__name__, namespace)
 
 
 def get_or_set(namespace: str, key: str, ttl_seconds: int, loader: Callable[[], Any]) -> CacheResult:
@@ -228,15 +236,24 @@ def get_or_set(namespace: str, key: str, ttl_seconds: int, loader: Callable[[], 
                 return result
             raise
 
-        stored_at = now if settings.cache_enabled else None
+        persisted = False
         if settings.cache_enabled:
-            _write(path, {"stored_at": stored_at, "value": value})
+            try:
+                _write(path, {"stored_at": now, "value": value})
+                persisted = True
+            except OSError as exc:
+                # Disk full or read-only: we already have the freshly-loaded value,
+                # so return it uncached rather than failing the whole request. The
+                # cache is an optimization, not a source of truth.
+                logger.warning(
+                    "cache write failed (%s); serving '%s' uncached", type(exc).__name__, namespace
+                )
         result = CacheResult(
             value=value,
             stale=False,
-            age_seconds=0.0 if settings.cache_enabled else None,
-            stored_at=stored_at,
-            status="miss" if settings.cache_enabled else "bypass",
+            age_seconds=0.0 if persisted else None,
+            stored_at=now if persisted else None,
+            status="miss" if persisted else "bypass",
         )
         _emit(namespace, key, result)
         return result
