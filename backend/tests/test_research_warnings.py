@@ -34,6 +34,36 @@ def test_peers_logs_provider_errors_without_exposing_exception_text(monkeypatch)
     assert any(warning["code"] == "PROVIDER_UNAVAILABLE" for warning in result["warnings"])
 
 
+def test_peers_drops_fmp_note_when_finnhub_fallback_succeeds(monkeypatch):
+    # FMP peers is premium-gated on the free plan; Finnhub (free) covers it. A working
+    # fallback should leave NO provider note beside fully-populated peer data.
+    monkeypatch.setattr(research.fmp, "key", "fixture")
+    monkeypatch.setattr(research.finnhub, "key", "fixture")
+    monkeypatch.setattr(research.fmp, "get_peers", lambda _t: (_ for _ in ()).throw(RuntimeError("premium endpoint")))
+    monkeypatch.setattr(research.finnhub, "get_peers", lambda _t: ["MSFT", "GOOGL"])
+
+    result = research.peers("AAPL")
+
+    assert result["served_by"] == "finnhub"
+    assert [p["ticker"] for p in result["peers"]] == ["MSFT", "GOOGL"]
+    assert result["warnings"] == []  # FMP failure suppressed because Finnhub delivered
+
+
+def test_analyst_drops_fmp_note_when_finnhub_rating_available(monkeypatch):
+    monkeypatch.setattr(research.fmp, "key", "fixture")
+    monkeypatch.setattr(research.finnhub, "key", "fixture")
+    monkeypatch.setattr(research.fmp, "get_price_target", lambda _t: (_ for _ in ()).throw(RuntimeError("premium endpoint")))
+    monkeypatch.setattr(research.finnhub, "get_recommendation", lambda _t: {
+        "strongBuy": 10, "buy": 8, "hold": 3, "sell": 1, "strongSell": 0,
+    })
+
+    result = research.analyst("AAPL")
+
+    assert result["available"] is True
+    assert result["analyst"]["rating"] in {"Strong Buy", "Buy"}
+    assert result["warnings"] == []  # FMP failure suppressed because Finnhub delivered a rating
+
+
 def test_analyst_route_promotes_warnings_to_meta(monkeypatch):
     monkeypatch.setattr(research.fmp, "key", "")
     monkeypatch.setattr(research.finnhub, "key", "")

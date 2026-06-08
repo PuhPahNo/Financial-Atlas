@@ -79,17 +79,21 @@ def _rating_label(snap) -> str | None:
 
 
 def analyst(ticker: str) -> dict:
-    warnings = []
+    # FMP (price targets) and Finnhub (recommendation buckets) are complementary.
+    # Treat an upstream failure as a soft, server-logged event and only surface a
+    # user-facing note if the section ends up with no usable data — otherwise a
+    # premium-gated FMP endpoint produces a scary note even though Finnhub covered it.
+    pending: list[dict] = []
     snap = None
     if fmp.enabled:
         try:
             snap = fmp.get_price_target(ticker)
         except Exception:
             log.warning("analyst price target provider failed", extra={"ticker": ticker, "provider": "fmp"}, exc_info=True)
-            warnings.append(_provider_error("analyst", "fmp"))
+            pending.append(_provider_error("analyst", "fmp"))
             snap = None
     else:
-        warnings.append(_provider_disabled("analyst", "fmp"))
+        pending.append(_provider_disabled("analyst", "fmp"))
     if finnhub.enabled:
         try:
             rec = finnhub.get_recommendation(ticker)
@@ -104,45 +108,54 @@ def analyst(ticker: str) -> dict:
                 snap.strong_sell = rec.get("strongSell")
         except Exception:
             log.warning("analyst recommendation provider failed", extra={"ticker": ticker, "provider": "finnhub"}, exc_info=True)
-            warnings.append(_provider_error("analyst", "finnhub"))
+            pending.append(_provider_error("analyst", "finnhub"))
     else:
-        warnings.append(_provider_disabled("analyst", "finnhub"))
-    if snap is None:
-        if not warnings:
-            warnings.append(_no_data("analyst"))
-        return {"analyst": None, "available": bool(fmp.enabled or finnhub.enabled), "warnings": warnings}
-    snap.rating = _rating_label(snap)
-    payload = snap.model_dump()
-    if not any(payload.get(key) is not None for key in ("target_high", "target_low", "target_consensus", "target_median", "rating")):
-        warnings.append(_no_data("analyst"))
-    return {"analyst": payload, "available": True, "warnings": warnings}
+        pending.append(_provider_disabled("analyst", "finnhub"))
+
+    payload = None
+    if snap is not None:
+        snap.rating = _rating_label(snap)
+        payload = snap.model_dump()
+    has_data = payload is not None and any(
+        payload.get(key) is not None
+        for key in ("target_high", "target_low", "target_consensus", "target_median", "rating")
+    )
+    if has_data:
+        # A source delivered usable data — drop upstream failure/disabled notes as noise.
+        return {"analyst": payload, "available": True, "warnings": []}
+    if not pending:
+        pending.append(_no_data("analyst"))
+    return {"analyst": payload, "available": bool(fmp.enabled or finnhub.enabled), "warnings": pending}
 
 
 def peers(ticker: str) -> dict:
-    warnings = []
+    # Prefer FMP peers (richer: name/price/market cap); fall back to Finnhub (free,
+    # tickers only). A successful fallback drops the upstream note rather than leaving
+    # a "temporarily unavailable from fmp" warning beside fully-populated peer data.
+    pending: list[dict] = []
     if fmp.enabled:
         try:
             rows = fmp.get_peers(ticker)
             if rows:
-                return {"peers": [p.model_dump() for p in rows], "served_by": "fmp", "warnings": warnings}
+                return {"peers": [p.model_dump() for p in rows], "served_by": "fmp", "warnings": []}
         except Exception:
             log.warning("peer provider failed", extra={"ticker": ticker, "provider": "fmp"}, exc_info=True)
-            warnings.append(_provider_error("peers", "fmp"))
+            pending.append(_provider_error("peers", "fmp"))
     else:
-        warnings.append(_provider_disabled("peers", "fmp"))
+        pending.append(_provider_disabled("peers", "fmp"))
     if finnhub.enabled:
         try:
             from ..providers.base import Peer
-            peers = [Peer(ticker=t).model_dump() for t in finnhub.get_peers(ticker)]
-            if peers:
-                return {"peers": peers, "served_by": "finnhub", "warnings": warnings}
+            rows = [Peer(ticker=t).model_dump() for t in finnhub.get_peers(ticker)]
+            if rows:
+                return {"peers": rows, "served_by": "finnhub", "warnings": []}
         except Exception:
             log.warning("peer fallback provider failed", extra={"ticker": ticker, "provider": "finnhub"}, exc_info=True)
-            warnings.append(_provider_error("peers", "finnhub"))
+            pending.append(_provider_error("peers", "finnhub"))
     else:
-        warnings.append(_provider_disabled("peers", "finnhub"))
-    warnings.append(_no_data("peers"))
-    return {"peers": [], "served_by": None, "warnings": warnings}
+        pending.append(_provider_disabled("peers", "finnhub"))
+    pending.append(_no_data("peers"))
+    return {"peers": [], "served_by": None, "warnings": pending}
 
 
 def compare(tickers: list[str]) -> dict:
