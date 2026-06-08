@@ -41,12 +41,37 @@ def test_peers_drops_fmp_note_when_finnhub_fallback_succeeds(monkeypatch):
     monkeypatch.setattr(research.finnhub, "key", "fixture")
     monkeypatch.setattr(research.fmp, "get_peers", lambda _t: (_ for _ in ()).throw(RuntimeError("premium endpoint")))
     monkeypatch.setattr(research.finnhub, "get_peers", lambda _t: ["MSFT", "GOOGL"])
+    # Keep enrichment hermetic (no network) — covered separately below.
+    monkeypatch.setattr(research, "_peer_name", lambda _t: None)
+    monkeypatch.setattr(research, "_peer_market_cap", lambda _t: None)
 
     result = research.peers("AAPL")
 
     assert result["served_by"] == "finnhub"
     assert [p["ticker"] for p in result["peers"]] == ["MSFT", "GOOGL"]
     assert result["warnings"] == []  # FMP failure suppressed because Finnhub delivered
+
+
+def test_finnhub_peers_enriched_with_name_and_market_cap(monkeypatch):
+    # Finnhub returns bare tickers; we backfill name (SEC map) + market cap (FMP quote)
+    # so the table renders fully instead of a column of dashes.
+    from app.providers.base import Quote
+
+    monkeypatch.setattr(research.fmp, "key", "fixture")
+    monkeypatch.setattr(research.finnhub, "key", "fixture")
+    monkeypatch.setattr(research.fmp, "get_peers", lambda _t: [])  # premium / empty
+    monkeypatch.setattr(research.finnhub, "get_peers", lambda _t: ["MSFT"])
+    monkeypatch.setattr(research.sec_edgar, "resolve_cik", lambda t: {"cik": "0", "title": "Microsoft Corp"})
+    monkeypatch.setattr(research.fmp, "get_quote", lambda t: Quote(price=400.0, market_cap=3_000_000_000_000))
+
+    result = research.peers("AAPL")
+
+    assert result["served_by"] == "finnhub"
+    peer = result["peers"][0]
+    assert peer["ticker"] == "MSFT"
+    assert peer["name"] == "Microsoft Corp"
+    assert peer["market_cap"] == 3_000_000_000_000
+    assert result["warnings"] == []
 
 
 def test_analyst_drops_fmp_note_when_finnhub_rating_available(monkeypatch):

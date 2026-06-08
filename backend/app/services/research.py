@@ -7,10 +7,38 @@ from __future__ import annotations
 
 import logging
 
-from ..providers.registry import finnhub, fmp
+from ..providers.registry import finnhub, fmp, sec_edgar
 from . import screener
 
 log = logging.getLogger(__name__)
+
+
+def _peer_name(ticker: str) -> str | None:
+    """Company name from SEC's cached ticker->CIK map (free, no extra network)."""
+    try:
+        return sec_edgar.resolve_cik(ticker).get("title")
+    except Exception:
+        return None
+
+
+def _peer_market_cap(ticker: str) -> float | None:
+    """Market cap from FMP's free quote endpoint (best-effort, short-cached)."""
+    if not fmp.enabled:
+        return None
+    try:
+        return fmp.get_quote(ticker).market_cap
+    except Exception:
+        return None
+
+
+def _enrich_peers(tickers: list[str]) -> list[dict]:
+    """Finnhub returns bare ticker symbols; fill name + market cap so the peer
+    table isn't half-blank. Both lookups degrade to None independently."""
+    from ..providers.base import Peer
+    return [
+        Peer(ticker=t, name=_peer_name(t), market_cap=_peer_market_cap(t)).model_dump()
+        for t in tickers
+    ]
 
 
 def _warning(section: str, code: str, message: str, *, provider: str | None = None) -> dict:
@@ -145,8 +173,7 @@ def peers(ticker: str) -> dict:
         pending.append(_provider_disabled("peers", "fmp"))
     if finnhub.enabled:
         try:
-            from ..providers.base import Peer
-            rows = [Peer(ticker=t).model_dump() for t in finnhub.get_peers(ticker)]
+            rows = _enrich_peers(finnhub.get_peers(ticker))
             if rows:
                 return {"peers": rows, "served_by": "finnhub", "warnings": []}
         except Exception:
