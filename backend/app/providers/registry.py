@@ -11,10 +11,12 @@ from ..core.errors import NotFoundError, ProviderError, RateLimitError
 from .finnhub import FinnhubProvider
 from .fmp import FmpProvider
 from .sec_edgar import SecEdgarProvider
+from .stooq import StooqProvider
 from .yahoo import YahooProvider
 
 sec_edgar = SecEdgarProvider()
 yahoo = YahooProvider()
+stooq = StooqProvider()      # keyless EOD fallback for when Yahoo is blocked/down
 finnhub = FinnhubProvider()  # keyed; self-disables without FINNHUB_API_KEY
 fmp = FmpProvider()          # keyed; self-disables without FMP_API_KEY
 
@@ -25,8 +27,8 @@ CHAINS = {
     "income": [sec_edgar],
     "balance": [sec_edgar],
     "cashflow": [sec_edgar],
-    "prices": [yahoo],
-    "quote": [fmp, yahoo],  # FMP is fresher (~real-time) + has volume & market cap; Yahoo fallback
+    "prices": [yahoo, stooq],          # Stooq (keyless EOD) catches a Yahoo outage
+    "quote": [fmp, yahoo, stooq],      # FMP is fresher; Yahoo, then Stooq fallback
     "insider": [sec_edgar],
     "institutional": [sec_edgar],
     "filings": [sec_edgar],
@@ -51,6 +53,12 @@ def run_chain(domain: str, method: str, *args, **kwargs):
             raise  # ticker genuinely not found — no point trying fallbacks
         except (RateLimitError, ProviderError) as exc:
             last_exc = exc
+            continue
+        except Exception as exc:  # noqa: BLE001
+            # An unexpected upstream shape (e.g. a non-JSON Yahoo body) must not
+            # escape as a bare 500: degrade to a ProviderError and try the next
+            # provider in the chain, so a single bad source can't sink the request.
+            last_exc = ProviderError(f"{provider.name} failed: {type(exc).__name__}")
             continue
     if last_exc:
         raise last_exc
