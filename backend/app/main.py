@@ -68,7 +68,7 @@ app = FastAPI(title="Financial Atlas API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin, "http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -86,4 +86,5 @@ async def atlas_error_handler(_: Request, exc: AtlasError):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "env": settings.env, "version": app.version}
+    # Minimal on purpose: this is a liveness probe, not an info endpoint.
+    return {"status": "ok"}

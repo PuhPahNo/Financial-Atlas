@@ -26,8 +26,19 @@ RUN cd frontend && npm run build \
     && npm prune --omit=dev \
     && chmod +x /app/scripts/render-start.sh
 
+# Run as the unprivileged `node` user (uid 1000, built into the node base image).
+# Writable paths it needs: /var/data (Render disk for CACHE_DIR; mkdir covers local
+# runs without a mount — Render mounts disks writable by uid 1000), /app/backend
+# (SQLite + default .cache when env vars are absent), /app/frontend/.next (Next.js
+# runtime cache). Both ports are >1024, so no root is required to bind.
+RUN mkdir -p /var/data \
+    && chown node:node /var/data /app/backend \
+    && chown -R node:node /app/frontend/.next
+
 ENV NODE_ENV=production
 
 EXPOSE 10000
+
+USER node
 
 CMD ["/app/scripts/render-start.sh"]
