@@ -88,17 +88,17 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_production_secrets(self) -> "Settings":
-        """Fail closed: never serve production traffic on the committed dev credentials.
+        """Fail closed: never serve production traffic on the committed dev AUTH_SECRET.
 
-        The dev fallbacks above exist so `make backend` works with zero setup, but the
         AUTH_SECRET signs session cookies — anyone who has read this repo could forge a
-        valid session if it ever reached production. Refusing to boot is the only safe
-        behavior.
+        valid session if production ever ran on the committed fallback, bypassing the
+        password entirely, so it must differ from the dev value. AUTH_PASSWORD only has
+        to be non-blank: its strength is the operator's deliberate choice (2026-06-09).
         """
         if self.env.lower() not in {"production", "prod", "staging"} or not self.auth_required:
             return self
         missing = []
-        if self.auth_password in ("", DEV_AUTH_PASSWORD):
+        if not self.auth_password:
             missing.append("AUTH_PASSWORD")
         if self.auth_secret in ("", DEV_AUTH_SECRET):
             missing.append("AUTH_SECRET")
