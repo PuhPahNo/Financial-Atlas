@@ -24,7 +24,9 @@ export default function LoginPage() {
       }
       const params = new URLSearchParams(window.location.search);
       const next = params.get("next");
-      window.location.href = next && next.startsWith("/") ? next : "/paper-trading";
+      // Same-site relative paths only: "//host" and "/\host" are protocol-relative
+      // redirects to attacker domains, so a bare startsWith("/") check is not enough.
+      window.location.href = next && /^\/(?![/\\])/.test(next) ? next : "/paper-trading";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed.");
     } finally {

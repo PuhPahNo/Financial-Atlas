@@ -14,12 +14,15 @@ _buckets: dict[str, tuple[int, int]] = {}
 
 
 def _client_key(request: Request, group: str) -> str:
+    # Use the *last* X-Forwarded-For hop: it's the one appended by our own proxy, so a
+    # client can't diversify buckets by spoofing the header. Never key on anything the
+    # client fully controls (e.g. the session cookie) — that made the limit bypassable
+    # by rotating fake values.
     forwarded = request.headers.get("x-forwarded-for", "")
-    ip = forwarded.split(",", 1)[0].strip() if forwarded else ""
+    ip = forwarded.rsplit(",", 1)[-1].strip() if forwarded else ""
     if not ip and request.client:
         ip = request.client.host
-    session = request.cookies.get(settings.auth_cookie_name, "")
-    return f"{group}:{ip or 'unknown'}:{session[-16:]}"
+    return f"{group}:{ip or 'unknown'}"
 
 
 def check_rate_limit(request: Request, *, group: str, limit: int, window_seconds: int = 60) -> None:

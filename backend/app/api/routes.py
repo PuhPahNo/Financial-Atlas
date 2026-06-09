@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from ..core.deps import require_edit_access
 from ..providers.base import Period
@@ -39,6 +40,56 @@ def envelope(
 
 def _period(value: str) -> Period:
     return Period.QUARTER if value == "quarter" else Period.ANNUAL
+
+
+# --- Request bodies ---------------------------------------------------------
+# Every mutating endpoint takes a typed model so malformed/oversized payloads are
+# rejected at the framework boundary instead of deep inside a service.
+
+_TICKER_FIELD = Field(min_length=1, max_length=12)
+
+
+class ValuationBody(BaseModel):
+    assumptions: dict[str, float | None] | None = None
+    weights: dict[str, float] | None = None
+
+
+class TickerBatchBody(BaseModel):
+    tickers: list[str] = Field(default_factory=list, max_length=600)
+
+
+class SeedBody(BaseModel):
+    tickers: list[str] | None = Field(default=None, max_length=600)
+
+
+class WarmBody(BaseModel):
+    tickers: list[str] | None = Field(default=None, max_length=600)
+    include_default: bool = False
+
+
+class ScreenFilter(BaseModel):
+    metric: str
+    op: str
+    value: float
+
+
+class ScreenSort(BaseModel):
+    metric: str
+    dir: str = "desc"
+
+
+class ScreenBody(BaseModel):
+    filters: list[ScreenFilter] = Field(default_factory=list, max_length=50)
+    sort: ScreenSort | None = None
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class WatchlistCreateBody(BaseModel):
+    name: str = Field(default="", max_length=120)
+
+
+class WatchlistItemBody(BaseModel):
+    ticker: str = _TICKER_FIELD
 
 
 @router.get("/search")
@@ -142,7 +193,7 @@ def market_context():
 
 
 @router.get("/market/best-picks")
-def market_best_picks(limit: int = 8):
+def market_best_picks(limit: int = Query(default=8, ge=1, le=50)):
     return envelope(market_service.best_picks(limit))
 
 
@@ -189,15 +240,15 @@ def valuation(ticker: str):
 
 
 @router.post("/valuation/{ticker}", dependencies=[Depends(require_edit_access)])
-def valuation_custom(ticker: str, body: dict = Body(default_factory=dict)):
+def valuation_custom(ticker: str, body: ValuationBody = ValuationBody()):
     from ..valuation import service as valuation_service
-    result = valuation_service.valuate(ticker, assumptions=body.get("assumptions"), weights=body.get("weights"))
-    valuation_service.record_result(ticker, result, weights=body.get("weights"))
+    result = valuation_service.valuate(ticker, assumptions=body.assumptions, weights=body.weights)
+    valuation_service.record_result(ticker, result, weights=body.weights)
     return envelope(result, ticker=ticker.upper(), served_by="derived")
 
 
 @router.get("/valuation/{ticker}/history")
-def valuation_history(ticker: str, limit: int = 20):
+def valuation_history(ticker: str, limit: int = Query(default=20, ge=1, le=200)):
     from ..valuation import service as valuation_service
     return envelope(valuation_service.valuation_history(ticker, limit=limit), ticker=ticker.upper(), served_by="local")
 
@@ -209,28 +260,30 @@ def screener_universe():
 
 
 @router.post("/screener/ingest", dependencies=[Depends(require_edit_access)])
-def screener_ingest(body: dict = Body(default_factory=dict)):
-    tickers = body.get("tickers") or []
-    return envelope(screener_service.ingest(tickers))
+def screener_ingest(body: TickerBatchBody = TickerBatchBody()):
+    return envelope(screener_service.ingest(body.tickers))
 
 
 @router.post("/screener/seed", dependencies=[Depends(require_edit_access)])
-def screener_seed(body: dict = Body(default_factory=dict)):
-    tickers = body.get("tickers")
-    return envelope(screener_service.seed_universe(tickers))
+def screener_seed(body: SeedBody = SeedBody()):
+    return envelope(screener_service.seed_universe(body.tickers))
 
 
 @router.post("/screener/warm", dependencies=[Depends(require_edit_access)])
-def screener_warm(body: dict = Body(default_factory=dict)):
+def screener_warm(body: WarmBody = WarmBody()):
     return envelope(screener_service.warm_universe(
-        tickers=body.get("tickers"),
-        include_default=bool(body.get("include_default", False)),
+        tickers=body.tickers,
+        include_default=body.include_default,
     ))
 
 
 @router.post("/screener")
-def screener_run(body: dict = Body(default_factory=dict)):
-    return envelope(screener_service.screen(body.get("filters", []), body.get("sort"), body.get("limit", 100)))
+def screener_run(body: ScreenBody = ScreenBody()):
+    return envelope(screener_service.screen(
+        [f.model_dump() for f in body.filters],
+        body.sort.model_dump() if body.sort else None,
+        body.limit,
+    ))
 
 
 # --- Watchlists -----------------------------------------------------------
@@ -240,8 +293,8 @@ def watchlists_list():
 
 
 @router.post("/watchlists", dependencies=[Depends(require_edit_access)])
-def watchlists_create(body: dict = Body(default_factory=dict)):
-    return envelope(watchlist_service.create_watchlist(body.get("name", "")))
+def watchlists_create(body: WatchlistCreateBody = WatchlistCreateBody()):
+    return envelope(watchlist_service.create_watchlist(body.name))
 
 
 @router.delete("/watchlists/{watchlist_id}", dependencies=[Depends(require_edit_access)])
@@ -250,8 +303,8 @@ def watchlists_delete(watchlist_id: int):
 
 
 @router.post("/watchlists/{watchlist_id}/items", dependencies=[Depends(require_edit_access)])
-def watchlist_add_item(watchlist_id: int, body: dict = Body(default_factory=dict)):
-    return envelope(watchlist_service.add_item(watchlist_id, body.get("ticker", "")))
+def watchlist_add_item(watchlist_id: int, body: WatchlistItemBody):
+    return envelope(watchlist_service.add_item(watchlist_id, body.ticker))
 
 
 @router.delete("/watchlists/{watchlist_id}/items/{ticker}", dependencies=[Depends(require_edit_access)])

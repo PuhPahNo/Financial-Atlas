@@ -8,9 +8,16 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+# Dev-only fallbacks. Production refuses to boot while these are in effect (see
+# Settings._require_production_secrets) so a missed env var can never ship the
+# well-known repo defaults.
+DEV_AUTH_PASSWORD = "admin123"
+DEV_AUTH_SECRET = "dev-atlas-auth-secret-change-me"
 
 
 class Settings(BaseSettings):
@@ -52,8 +59,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-5.5"
     auth_required: bool = True
     auth_username: str = "admin"
-    auth_password: str = "admin123"
-    auth_secret: str = "dev-atlas-auth-secret-change-me"
+    auth_password: str = DEV_AUTH_PASSWORD
+    auth_secret: str = DEV_AUTH_SECRET
     auth_cookie_name: str = "atlas_session"
     auth_session_ttl_seconds: int = 7 * 24 * 60 * 60
     paper_trading_rate_limit_per_minute: int = 240
@@ -78,6 +85,29 @@ class Settings(BaseSettings):
     # Reserved for the future paper-trading / backtesting phase (Alpaca).
     alpaca_api_key: str = ""
     alpaca_secret: str = ""
+
+    @model_validator(mode="after")
+    def _require_production_secrets(self) -> "Settings":
+        """Fail closed: never serve production traffic on the committed dev credentials.
+
+        The dev fallbacks above exist so `make backend` works with zero setup, but the
+        AUTH_SECRET signs session cookies — anyone who has read this repo could forge a
+        valid session if it ever reached production. Refusing to boot is the only safe
+        behavior.
+        """
+        if self.env.lower() not in {"production", "prod", "staging"} or not self.auth_required:
+            return self
+        missing = []
+        if self.auth_password in ("", DEV_AUTH_PASSWORD):
+            missing.append("AUTH_PASSWORD")
+        if self.auth_secret in ("", DEV_AUTH_SECRET):
+            missing.append("AUTH_SECRET")
+        if missing:
+            raise ValueError(
+                f"Refusing to start with default/blank credentials in env={self.env!r}: "
+                f"set {', '.join(missing)} (or set AUTH_REQUIRED=false to run without auth)."
+            )
+        return self
 
 
 @lru_cache
