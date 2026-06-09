@@ -21,6 +21,15 @@ def test_protected_workspaces_require_login():
     assert health.status_code == 200
 
 
+def test_security_headers_present_on_responses():
+    client = TestClient(app)
+    res = client.get("/health")
+    assert res.headers["X-Content-Type-Options"] == "nosniff"
+    assert res.headers["X-Frame-Options"] == "DENY"
+    assert res.headers["Content-Security-Policy"] == "frame-ancestors 'none'"
+    assert res.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+
 def test_authenticated_user_can_read_protected_workspace():
     client = authenticate(TestClient(app))
     res = client.get("/api/v1/paper-trading/categories")

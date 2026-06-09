@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# On Render the container must start as root: the persistent disk mounted at
+# /var/data arrives root-owned, and only root can hand it to the app user.
+# Fix ownership, then re-exec this script as the unprivileged `node` user
+# (uid 1000) so every process below runs without root. Local non-root runs
+# skip this branch entirely.
+if [[ "$(id -u)" == "0" ]]; then
+  chown -R node:node /var/data 2>/dev/null || true
+  export HOME=/home/node USER=node LOGNAME=node
+  exec setpriv --reuid node --regid node --init-groups "$0" "$@"
+fi
+
 PORT="${PORT:-10000}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 APP_ROOT="${APP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"

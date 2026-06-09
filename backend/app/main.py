@@ -72,6 +72,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    # Next.js applies its next.config hardening headers to pages but not to
+    # responses proxied through the /api rewrite, so the backend sets its own.
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
+
 app.include_router(router)
 app.include_router(assistant.router)
 app.include_router(paper_trading.router)

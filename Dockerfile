@@ -26,11 +26,13 @@ RUN cd frontend && npm run build \
     && npm prune --omit=dev \
     && chmod +x /app/scripts/render-start.sh
 
-# Run as the unprivileged `node` user (uid 1000, built into the node base image).
-# Writable paths it needs: /var/data (Render disk for CACHE_DIR; mkdir covers local
-# runs without a mount — Render mounts disks writable by uid 1000), /app/backend
-# (SQLite + default .cache when env vars are absent), /app/frontend/.next (Next.js
-# runtime cache). Both ports are >1024, so no root is required to bind.
+# The app runs as the unprivileged `node` user (uid 1000, built into the node base
+# image), but the container starts as root: Render mounts the /var/data disk
+# root-owned, so render-start.sh chowns it at boot and then drops to `node` via
+# setpriv before launching any app process. The chowns below cover paths baked
+# into the image: /var/data for local runs without a mount, /app/backend (SQLite +
+# default .cache when env vars are absent), /app/frontend/.next (Next.js runtime
+# cache). Both ports are >1024, so the app processes never need root.
 RUN mkdir -p /var/data \
     && chown node:node /var/data /app/backend \
     && chown -R node:node /app/frontend/.next
@@ -38,7 +40,5 @@ RUN mkdir -p /var/data \
 ENV NODE_ENV=production
 
 EXPOSE 10000
-
-USER node
 
 CMD ["/app/scripts/render-start.sh"]
