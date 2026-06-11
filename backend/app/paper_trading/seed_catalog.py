@@ -58,7 +58,7 @@ SEED_STRATEGIES = [
         "description": "Looks for range expansion after low-volatility consolidation.",
         "history": "Pattern follows common breakout systems but uses daily bars only.",
         "methodology": "Enter when close exceeds recent channel after volatility compression.",
-        "parameters": {"tickers": ["SPY", "QQQ", "IWM"], "channel_days": 55, "risk_pct": 0.01},
+        "parameters": {"tickers": ["SPY", "QQQ", "IWM"], "universe": "tickers", "channel_days": 55, "risk_pct": 0.01},
         "metrics": {"backtested_return": 0.082, "win_rate": 0.44, "max_drawdown": -0.18},
     },
     {
@@ -67,7 +67,7 @@ SEED_STRATEGIES = [
         "description": "Buys broad ETFs after short-term oversold moves with stop controls.",
         "history": "Short-horizon reversal model with strict risk limits.",
         "methodology": "Enter when drawdown and RSI proxy show oversold conditions.",
-        "parameters": {"tickers": ["SPY", "DIA", "QQQ"], "drop_threshold": -0.04, "hold_days": 5},
+        "parameters": {"tickers": ["SPY", "DIA", "QQQ"], "universe": "tickers", "drop_threshold": -0.04, "hold_days": 5},
         "metrics": {"backtested_return": 0.071, "win_rate": 0.58, "max_drawdown": -0.16},
     },
     {
@@ -122,7 +122,7 @@ SEED_STRATEGIES = [
         "description": "Models covered-call behavior using underlying price and capped upside assumptions.",
         "history": "Options-themed income model until historical options chains are available.",
         "methodology": "Hold underlying exposure, cap upside monthly, and model synthetic premium.",
-        "parameters": {"tickers": ["AAPL", "MSFT"], "monthly_premium_pct": 0.015, "upside_cap_pct": 0.04},
+        "parameters": {"tickers": ["AAPL", "MSFT"], "universe": "tickers", "monthly_premium_pct": 0.015, "upside_cap_pct": 0.04},
         "metrics": {"backtested_return": 0.088, "win_rate": 0.6, "max_drawdown": -0.19},
     },
     {
@@ -131,7 +131,7 @@ SEED_STRATEGIES = [
         "description": "Uses underlying prices to model downside insurance costs and floors.",
         "history": "Synthetic hedge model for scenario analysis without options-chain data.",
         "methodology": "Deduct monthly hedge cost and cap drawdowns after floor threshold.",
-        "parameters": {"tickers": ["SPY"], "hedge_cost_pct": 0.01, "floor_drawdown_pct": -0.08},
+        "parameters": {"tickers": ["SPY"], "universe": "tickers", "hedge_cost_pct": 0.01, "floor_drawdown_pct": -0.08},
         "metrics": {"backtested_return": 0.061, "win_rate": 0.55, "max_drawdown": -0.13},
     },
     {
@@ -140,7 +140,7 @@ SEED_STRATEGIES = [
         "description": "Simulates short-volatility income with drawdown throttles.",
         "history": "Proxy model for volatility-premium research on broad ETFs.",
         "methodology": "Earn synthetic premium during calm periods and reduce exposure in drawdowns.",
-        "parameters": {"tickers": ["SPY", "QQQ"], "premium_pct": 0.012, "risk_off_drawdown": -0.06},
+        "parameters": {"tickers": ["SPY", "QQQ"], "universe": "tickers", "premium_pct": 0.012, "risk_off_drawdown": -0.06},
         "metrics": {"backtested_return": 0.074, "win_rate": 0.62, "max_drawdown": -0.2},
     },
     {
@@ -170,7 +170,7 @@ SEED_STRATEGIES = [
         "description": "Looks for shareholder yield backed by free cash flow.",
         "history": "Tracks companies returning capital through dividends and buybacks.",
         "methodology": "Blend dividends, repurchases, FCF margin, and debt capacity.",
-        "parameters": {"tickers": ["XOM", "CVX", "AAPL"], "min_shareholder_yield": 0.04},
+        "parameters": {"tickers": ["XOM", "CVX", "AAPL"], "min_yield": 0.015, "min_fcf_coverage": 2.0},
         "metrics": {"backtested_return": 0.091, "win_rate": 0.53, "max_drawdown": -0.23},
     },
     {
@@ -179,7 +179,7 @@ SEED_STRATEGIES = [
         "description": "Rotates among ETFs and cash based on relative strength.",
         "history": "Simple tactical allocation model for regime shifts.",
         "methodology": "Hold top-ranked ETF when above trend; otherwise move to cash.",
-        "parameters": {"tickers": ["SPY", "QQQ", "TLT", "GLD"], "lookback_days": 126, "cash_symbol": "CASH"},
+        "parameters": {"tickers": ["SPY", "QQQ", "TLT", "GLD"], "universe": "tickers", "lookback_days": 126, "cash_symbol": "CASH"},
         "metrics": {"backtested_return": 0.084, "win_rate": 0.52, "max_drawdown": -0.15},
     },
     {
@@ -188,7 +188,7 @@ SEED_STRATEGIES = [
         "description": "Cuts exposure when portfolio drawdown breaches a threshold.",
         "history": "Risk-first overlay for equity strategies.",
         "methodology": "Scale down after drawdown, restore after trend recovery.",
-        "parameters": {"tickers": ["SPY"], "drawdown_limit": -0.1, "reentry_days": 20},
+        "parameters": {"tickers": ["SPY"], "universe": "tickers", "drawdown_limit": -0.1, "reentry_days": 20},
         "metrics": {"backtested_return": 0.068, "win_rate": 0.54, "max_drawdown": -0.12},
     },
     {
@@ -221,7 +221,7 @@ SEED_STRATEGIES = [
         "description": "Tests equity-to-defensive rotation during stress windows.",
         "history": "Designed for periods like 2006-2009 where drawdown control matters.",
         "methodology": "Rotate from equities to defensive assets when trend and volatility deteriorate.",
-        "parameters": {"tickers": ["SPY", "TLT", "GLD"], "slow_days": 200, "volatility_limit": 0.28},
+        "parameters": {"tickers": ["SPY", "TLT", "GLD"], "universe": "tickers", "slow_days": 200, "volatility_limit": 0.28},
         "metrics": {"backtested_return": 0.073, "win_rate": 0.5, "max_drawdown": -0.14},
     },
     # ------------------------------------------------------------------ #
