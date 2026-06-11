@@ -30,3 +30,11 @@ def run_parameter_sweep(payload: ParameterSweepRequest):
 @router.get("/backtests/{run_id}")
 def get_backtest(run_id: int):
     return envelope(service.get_backtest(run_id))
+
+
+@router.post("/backtests/warm")
+def warm_backtest_data(years: int = 25, include_fundamentals: bool = True):
+    """Pre-fill the durable price store + PIT fundamentals for the investable superset
+    so subsequent backtests run from local data (best-effort, long-running)."""
+    from ..jobs import warm_prices
+    return envelope(warm_prices.run(years=years, include_fundamentals=include_fundamentals))

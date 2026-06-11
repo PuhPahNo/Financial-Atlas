@@ -14,24 +14,52 @@ def _daily(start, end, price_fn):
 
 
 def _stub_prices(series_by_sym):
-    def _pw(sym, *, start, end, interval="1d"):
+    def _gs(sym, start, end):
         bars = [b for b in series_by_sym.get(sym, []) if start.isoformat() <= b["date"] <= end.isoformat()]
-        return {"bars": bars, "currency": "USD"}, "stub"
-    return _pw
+        return [b["date"] for b in bars], [float(b["close"]) for b in bars], "stub"
+    return _gs
 
 
-def test_real_backtest_routes_through_active_screening_with_universe_caveat(monkeypatch):
-    """Real (non-fixture) backtests route through the active S&P 500 screener and carry the
-    survivorship caveat. Point-in-time entry is the expected default, so it is not flagged."""
+def test_real_backtest_routes_through_active_screening_with_integrity_report(monkeypatch):
+    """Real (non-fixture) backtests route through the active S&P 500 screener. With
+    point-in-time membership on (the default), the survivorship caveat is replaced by the
+    integrity report: membership passes, delisted-coverage stays an honest warning."""
     start, end, hist0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
     import app.backtesting.screen as s
     import app.backtesting.engine as eng
     series = {"AAA": _daily(hist0, end, lambda d: 100.0), "SPY": _daily(hist0, end, lambda d: 100.0)}
-    monkeypatch.setattr(s.prices, "price_window", _stub_prices(series))
+    monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
     monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])   # avoid network fetches
     monkeypatch.setattr(eng.univ, "members_on", lambda d: {"AAA"})
 
     res = eng.run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
                            tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)
-    assert any("survivorship" in w.lower() for w in res["warnings"])
+    checks = {c["id"]: c["status"] for c in res["integrity"]["checks"]}
+    assert checks["membership"] == "pass"        # PIT membership reconstruction active
+    assert checks["delistings"] == "warn"        # residual survivorship disclosed honestly
+    assert checks["adjusted_prices"] == "pass"
+    assert checks["execution"] == "pass"
+    assert not any("survivorship" in w.lower() for w in res["warnings"])
     assert not any("look-ahead" in w.lower() for w in res["warnings"])
+
+
+def test_fixed_basket_models_trade_only_their_tickers(monkeypatch):
+    """A model declaring universe=tickers (e.g. ETF rotation) trades only its own basket —
+    the S&P superset is never scanned and the integrity report marks the fixed universe."""
+    start, end, hist0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
+    import app.backtesting.screen as s
+    import app.backtesting.engine as eng
+    rise = lambda d: 50 + 50 * ((d - hist0).days / (end - hist0).days)
+    series = {"SPY": _daily(hist0, end, rise), "AGG": _daily(hist0, end, lambda d: 100.0)}
+    monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
+    monkeypatch.setattr(eng.univ, "investable_superset", lambda: (_ for _ in ()).throw(AssertionError("superset must not be scanned")))
+
+    res = eng.run_backtest(
+        strategy={"category": "risk_rotation", "name": "GEM",
+                  "parameters": {"tickers": ["SPY", "AGG"], "universe": "tickers", "model": "dual_momentum",
+                                 "lookback_days": 252, "take_profit_pct": 0.99, "stop_loss_pct": 0.99}},
+        tickers=["SPY", "AGG"], start_date=start, end_date=end, starting_cash=10000.0)
+    traded = {t["ticker"] for t in res["trades"]}
+    assert traded <= {"SPY", "AGG"}
+    checks = {c["id"]: c["status"] for c in res["integrity"]["checks"]}
+    assert checks["membership"] == "info"  # fixed basket — index membership does not apply

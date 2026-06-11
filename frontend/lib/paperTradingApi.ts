@@ -42,12 +42,23 @@ export interface Category {
   strategies: Strategy[];
 }
 
+export interface IntegrityCheck {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "info";
+  detail: string;
+}
+export interface Integrity {
+  checks: IntegrityCheck[];
+  grade: "pass" | "warn" | "info";
+}
 export interface BacktestRun {
   id: number;
   strategy_id: number;
   name: string;
   metrics: Record<string, number | null>;
   warnings: string[];
+  integrity?: Integrity | null;
   trades: any[];
   equity_curve: { date: string; cash: number; equity: number; benchmark_equity: number }[];
 }

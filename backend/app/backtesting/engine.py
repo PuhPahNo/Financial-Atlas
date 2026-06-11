@@ -16,13 +16,14 @@ would silently fetch only recent bars and find nothing in the date filter.
 """
 from __future__ import annotations
 
-import math
+import bisect
 from datetime import date, timedelta
 
 from ..core.config import settings
 from ..core.errors import ValidationError
-from ..services import prices
+from ..services import price_store
 from . import universe as univ
+from .integrity import build_integrity
 from .metrics import summarize
 from .screen import run_active_backtest
 
@@ -45,12 +46,12 @@ def _parse_day(value: str | date) -> date:
 
 
 def _fetch_window(ticker: str, start: date, end: date) -> tuple[list[dict], str]:
-    """Daily bars over an explicit window. Uses Yahoo ``period1``/``period2`` so
-    arbitrary historical windows return true daily granularity (the ``range``
-    shortcut silently downsamples long spans to monthly)."""
-    payload, served_by = prices.price_window(ticker, start=start, end=end, interval="1d")
-    bars = [b for b in payload["bars"] if b.get("close") is not None]
-    bars.sort(key=lambda bar: str(bar["date"]))
+    """Daily bars over an explicit window, served from the durable price store
+    (dividend/split-**adjusted** closes — raw closes overstate pre-split returns and
+    drop dividend income entirely). The store hits the network only for bars it has
+    never seen, so repeat backtests cost zero provider calls."""
+    dates, closes, served_by = price_store.get_series(ticker, start=start, end=end)
+    bars = [{"date": d, "close": c, "ticker": ticker} for d, c in zip(dates, closes)]
     return bars, served_by
 
 
@@ -232,12 +233,19 @@ def _buy_hold(*, ticker, bars, starting_cash, cost_rate, benchmark_fn, end_date)
     return trades, equity_curve, holdings, final_holdings, residual_cash
 
 
+def _fired_between(fire_sorted: list[str], lo: str, hi: str) -> bool:
+    """True if any signal date f satisfies lo <= f < hi. Entries execute on the first
+    bar *after* the signal fires — never on the same bar that produced it."""
+    i = bisect.bisect_left(fire_sorted, lo)
+    return i < len(fire_sorted) and fire_sorted[i] < hi
+
+
 def _run_rules(*, spec, bars, ref_bars, starting_cash, cost_rate, benchmark_fn, start_date, end_date, warnings):
     instrument = spec["instrument"]
     direction = spec["direction"]
     tp, sl = spec["take_profit_pct"], spec["stop_loss_pct"]
     max_hold = spec["max_hold_days"]
-    fire = _signal_dates(ref_bars, spec, end_date)
+    fire_sorted = sorted(_signal_dates(ref_bars, spec, end_date))
 
     cash = float(starting_cash)
     pos: dict | None = None
@@ -269,7 +277,7 @@ def _run_rules(*, spec, bars, ref_bars, starting_cash, cost_rate, benchmark_fn, 
         })
         pos = None
 
-    for bar in bars:
+    for i, bar in enumerate(bars):
         day = _parse_day(bar["date"])
         close = float(bar["close"])
         closed_this_bar = False
@@ -287,7 +295,10 @@ def _run_rules(*, spec, bars, ref_bars, starting_cash, cost_rate, benchmark_fn, 
                 close_position(day, close, f"time stop ({max_hold}d)")
                 closed_this_bar = True
 
-        if pos is None and not closed_this_bar and bar["date"] in fire and cash > close:
+        # Next-bar fills: a signal that fired since the previous bar executes at *this*
+        # bar's close — the first price obtainable after the signal was knowable.
+        signal_pending = i > 0 and _fired_between(fire_sorted, str(bars[i - 1]["date"]), str(bar["date"]))
+        if pos is None and not closed_this_bar and signal_pending and cash > close:
             entry_price = close * (1 + cost_rate) if direction == "long" else close * (1 - cost_rate)
             budget = cash * 0.95
             qty = int(budget / (entry_price if direction == "long" else close))
@@ -379,7 +390,17 @@ def run_backtest(
     # exit on take-profit / stop-loss / max-hold / criteria-break. The model's own tickers are
     # folded in as extra candidates. Fixtures and rule-based models keep their existing paths.
     if spec is None and not use_fixture_data:
+        params = strategy.get("parameters", {}) or {}
         model_t = {t.strip().upper().replace(".", "-") for t in tickers if t and t.strip()}
+        # Fixed-basket models (ETF rotation, dual momentum, GTAA…) trade only the
+        # tickers they declare; index models scan the point-in-time S&P 500 superset.
+        if str(params.get("universe") or "").lower() in {"tickers", "fixed", "custom"} and model_t:
+            return run_active_backtest(
+                strategy=strategy, universe=sorted(model_t), start_date=start_date, end_date=end_date,
+                starting_cash=starting_cash, transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps, benchmark=benchmark, membership_on=None,
+                universe_kind="fixed",
+            )
         superset = sorted(set(univ.investable_superset()) | model_t)
         cap = settings.backtest_universe_max
         if cap and cap > 0 and len(superset) > cap:  # safety backstop (0 = unlimited)
@@ -449,6 +470,7 @@ def run_backtest(
         if benchmark and benchmark.upper() != instrument and benchmark_fn is None:
             warnings.append(f"Benchmark {benchmark.upper()} approximated from {instrument} path in this run.")
 
+    mode = "fixture" if use_fixture_data else ("rules" if spec else "buy_hold")
     return {
         "strategy": strategy,
         "served_by": served_by,
@@ -462,6 +484,10 @@ def run_backtest(
         "final_holdings": final_holdings,
         "residual_cash": residual_cash,
         "date_range": {"start": start_date, "end": end_date},
+        "integrity": build_integrity(
+            mode=mode, uses_fundamentals=False,
+            transaction_cost_bps=transaction_cost_bps, slippage_bps=slippage_bps,
+        ),
     }
 
 

@@ -155,10 +155,13 @@ SEED_STRATEGIES = [
     {
         "category": "income_quality",
         "name": "Quality Low Vol",
-        "description": "Combines profitable companies with lower drawdown profiles.",
-        "history": "Defensive quality model for volatile markets.",
-        "methodology": "Rank by price stability, FCF margin, and leverage constraints.",
-        "parameters": {"tickers": ["PEP", "WMT", "MCD"], "lookback_days": 252, "max_volatility": 0.25},
+        "description": "Holds the calmest names in the index — the low-volatility anomaly in its plainest form.",
+        "history": "Low-volatility portfolios (Haugen & Baker; S&P 500 Low Volatility Index) have historically "
+                   "matched the market with smaller drawdowns, defying textbook risk-return intuition.",
+        "methodology": "Rank by trailing one-year realized volatility (annualized) and hold the calmest names "
+                       "under the volatility ceiling, equal-weight.",
+        "parameters": {"tickers": ["PEP", "WMT", "MCD"], "model": "low_volatility", "max_volatility": 0.25,
+                       "max_positions": 15, "take_profit_pct": 0.40, "stop_loss_pct": 0.15, "max_hold_days": 365},
         "metrics": {"backtested_return": 0.083, "win_rate": 0.57, "max_drawdown": -0.17},
     },
     {
@@ -220,6 +223,135 @@ SEED_STRATEGIES = [
         "methodology": "Rotate from equities to defensive assets when trend and volatility deteriorate.",
         "parameters": {"tickers": ["SPY", "TLT", "GLD"], "slow_days": 200, "volatility_limit": 0.28},
         "metrics": {"backtested_return": 0.073, "win_rate": 0.5, "max_drawdown": -0.14},
+    },
+    # ------------------------------------------------------------------ #
+    # Mainstream academic / practitioner models (PRD model-lab).          #
+    # Metrics ship empty on purpose: every number shown comes from a real #
+    # point-in-time backtest run in this workspace, never a seeded claim. #
+    # ------------------------------------------------------------------ #
+    {
+        "category": "long_term",
+        "name": "Piotroski F-Score",
+        "description": "Buys financially strengthening companies scoring 7+ on Piotroski's nine accounting signals.",
+        "history": "Joseph Piotroski (2000), 'Value Investing: The Use of Historical Financial Statement "
+                   "Information to Separate Winners from Losers' — one of the most replicated quality screens in finance.",
+        "methodology": "Each year of originally-filed 10-K data is scored on nine signals: positive ROA and "
+                       "operating cash flow, improving ROA, cash flow above net income (low accruals), falling "
+                       "leverage, improving current ratio, no share issuance, improving gross margin, and improving "
+                       "asset turnover. Names scoring at least the minimum (default 7) qualify; ranked by score "
+                       "plus free-cash-flow yield.",
+        "parameters": {"tickers": [], "model": "f_score", "min_f_score": 7, "max_positions": 12,
+                       "take_profit_pct": 0.50, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "long_term",
+        "name": "Magic Formula",
+        "description": "Joel Greenblatt's two-factor screen: cheap (earnings yield) and good (return on capital).",
+        "history": "Popularized in 'The Little Book That Beats the Market' (2005); holds a basket of 20-30 names "
+                   "ranked jointly on EBIT/EV and EBIT/capital.",
+        "methodology": "Earnings yield = EBIT ÷ enterprise value (market cap + net debt); return on capital = "
+                       "EBIT ÷ (total assets − current liabilities). Both from originally-filed annual statements, "
+                       "priced point-in-time. Names clearing the floors qualify; ranked by the sum of the two yields.",
+        "parameters": {"tickers": [], "model": "magic_formula", "min_earnings_yield": 0.04, "min_roc": 0.10,
+                       "max_positions": 20, "take_profit_pct": 0.60, "stop_loss_pct": 0.25, "max_hold_days": 365},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "long_term",
+        "name": "Value Composite",
+        "description": "Owns companies cheap on both free-cash-flow yield and earnings yield.",
+        "history": "A two-ratio cousin of O'Shaughnessy's value composites — blending yields is more robust than "
+                   "any single cheapness measure.",
+        "methodology": "Free-cash-flow yield and earnings yield are computed from originally-filed annual figures "
+                       "against the point-in-time price; both must be positive, ranked by their average.",
+        "parameters": {"tickers": [], "model": "value_composite", "max_positions": 15,
+                       "take_profit_pct": 0.50, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "short_term",
+        "name": "12-1 Momentum",
+        "description": "The classic cross-sectional momentum factor: strong over twelve months, skipping the latest one.",
+        "history": "Jegadeesh & Titman (1993) documented that 3-12 month winners keep winning; the one-month skip "
+                   "avoids short-term reversal. The backbone of every academic momentum factor since.",
+        "methodology": "Rank by trailing 12-month return excluding the most recent month; positive scores qualify, "
+                       "top names held equal-weight with stop-loss and take-profit guards.",
+        "parameters": {"tickers": [], "model": "momentum_12_1", "max_positions": 10,
+                       "take_profit_pct": 0.30, "stop_loss_pct": 0.15, "max_hold_days": 90},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "short_term",
+        "name": "52-Week High",
+        "description": "Buys names trading within a few percent of their one-year high.",
+        "history": "George & Hwang (2004) showed proximity to the 52-week high predicts returns about as well as "
+                   "past returns themselves — anchoring makes investors slow to bid stocks through old highs.",
+        "methodology": "Eligible when the latest close is at least the minimum proximity (default 95%) of the "
+                       "trailing 252-day high; ranked by proximity.",
+        "parameters": {"tickers": [], "model": "high_52w", "min_proximity": 0.95, "max_positions": 10,
+                       "take_profit_pct": 0.25, "stop_loss_pct": 0.12, "max_hold_days": 120},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "short_term",
+        "name": "RSI-2 Mean Reversion",
+        "description": "Buys deep short-term oversold dips in broad ETFs that remain in long-term uptrends.",
+        "history": "Larry Connors' RSI(2) system: extreme two-day RSI readings inside an uptrend mark panic dips "
+                   "that tend to snap back within days.",
+        "methodology": "Eligible when the 2-day RSI falls to 10 or below while price holds above its 200-day "
+                       "average; exits when the oversold reading clears (criteria exit) or on tight profit/stop bands.",
+        "parameters": {"tickers": ["SPY", "QQQ", "DIA", "IWM"], "universe": "tickers", "model": "rsi_reversion",
+                       "rsi_days": 2, "max_rsi": 10, "max_positions": 4,
+                       "take_profit_pct": 0.05, "stop_loss_pct": 0.05, "max_hold_days": 10},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "income_quality",
+        "name": "Dividend Dogs",
+        "description": "Holds the highest yielders whose dividends are fully covered by free cash flow.",
+        "history": "A point-in-time take on the 'Dogs of the Dow' tradition — harvest yield, but use cash-flow "
+                   "coverage to dodge the classic yield-trap failure mode.",
+        "methodology": "Dividend yield from originally-filed dividends paid against the point-in-time price; "
+                       "requires free cash flow to cover the payout. Top yielders held equal-weight.",
+        "parameters": {"tickers": [], "model": "dividend_yield", "min_yield": 0.03, "min_fcf_coverage": 1.0,
+                       "max_positions": 10, "take_profit_pct": 0.40, "stop_loss_pct": 0.18, "max_hold_days": 365},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "risk_rotation",
+        "name": "Dual Momentum (GEM)",
+        "description": "Gary Antonacci's Global Equities Momentum: US stocks, international stocks, or bonds — whichever leads.",
+        "history": "From 'Dual Momentum Investing' (2014): relative momentum picks the strongest asset, absolute "
+                   "momentum steps aside to bonds/cash when nothing is rising.",
+        "methodology": "Each day, rank SPY, EFA and AGG by trailing 12-month return; hold the leader only while its "
+                       "own return is positive (absolute-momentum gate), otherwise sit in cash.",
+        "parameters": {"tickers": ["SPY", "EFA", "AGG"], "universe": "tickers", "model": "dual_momentum",
+                       "lookback_days": 252, "take_profit_pct": 0.99, "stop_loss_pct": 0.15, "max_hold_days": 365},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+    },
+    {
+        "category": "risk_rotation",
+        "name": "Faber Trend (GTAA)",
+        "description": "Meb Faber's tactical asset allocation: hold each asset class only while it's above its long-term trend.",
+        "history": "'A Quantitative Approach to Tactical Asset Allocation' (2007) — the most-downloaded SSRN paper "
+                   "ever: a 10-month moving-average filter on five asset classes cut drawdowns dramatically.",
+        "methodology": "US stocks, foreign stocks, bonds, real estate and commodities (SPY, EFA, AGG, VNQ, DBC) are "
+                       "each held while price sits above the ~10-month (210-day) moving average; below it, that "
+                       "sleeve rotates to cash.",
+        "parameters": {"tickers": ["SPY", "EFA", "AGG", "VNQ", "DBC"], "universe": "tickers",
+                       "model": "trend_following", "sma_days": 210, "max_positions": 5,
+                       "take_profit_pct": 0.99, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
+        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
     },
 ]
 

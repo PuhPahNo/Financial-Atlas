@@ -337,11 +337,16 @@ export function knobsToPayload(name: string, category: string, knobs: Knobs, tag
 }
 
 // ---- backtest regimes → real date ranges --------------------------------
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+const yearsAgo = (n: number) => { const d = new Date(); d.setFullYear(d.getFullYear() - n); return isoDate(d); };
+
 export const REGIMES = [
+  { id: "dotcom", label: "2000 – 2003", sub: "Dot-com bust", start: "2000-01-01", end: "2003-12-31" },
   { id: "gfc", label: "2006 – 2009", sub: "Global Financial Crisis", start: "2006-06-01", end: "2009-12-31" },
-  { id: "covid", label: "2019 – 2021", sub: "COVID crash & melt-up", start: "2019-06-01", end: "2021-06-30" },
   { id: "bull", label: "2013 – 2017", sub: "Steady bull market", start: "2013-01-01", end: "2017-12-31" },
+  { id: "covid", label: "2019 – 2021", sub: "COVID crash & melt-up", start: "2019-06-01", end: "2021-06-30" },
   { id: "bear", label: "2022", sub: "Rate-shock bear", start: "2022-01-01", end: "2022-12-31" },
+  { id: "recent", label: "Last 3 years", sub: "Recent market", start: yearsAgo(3), end: isoDate(new Date()) },
 ];
 
 // ---- favorites (localStorage) -------------------------------------------

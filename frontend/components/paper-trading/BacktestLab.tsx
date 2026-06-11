@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ParameterSweep, paperTradingApi } from "@/lib/paperTradingApi";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Integrity, ParameterSweep, paperTradingApi } from "@/lib/paperTradingApi";
 import { Btn, Icon, Segmented, TextInput } from "./ptkit";
 import { AreaChart, Donut, ReturnBars, drawdownOf, Pt } from "./ptcharts";
 import { fmt, REGIMES, Model } from "./ptdata";
@@ -9,6 +9,8 @@ import { fmt, REGIMES, Model } from "./ptdata";
 interface Result {
   equity: Pt[]; bench: Pt[];
   stats: { final: number; totalRet: number; alpha: number; cagr: number; maxDD: number; winRate: number; best: number; worst: number };
+  metrics: Record<string, number | null>;
+  integrity: Integrity | null;
   trades: any[]; holdings: { ticker: string; w: number }[]; warnings: string[];
 }
 interface NumericParam { path: string; label: string; value: number }
@@ -66,8 +68,54 @@ function adapt(data: any, capital: number): Result {
   return {
     equity, bench,
     stats: { final, totalRet, alpha: totalRet - benchRet, cagr, maxDD, winRate, best: pnls.length ? Math.max(...pnls) : 0, worst: pnls.length ? Math.min(...pnls) : 0 },
+    metrics: m,
+    integrity: data.run?.integrity ?? null,
     trades, holdings, warnings: data.run?.warnings ?? [],
   };
+}
+
+const INTEGRITY_TONE: Record<string, { color: string; bg: string; mark: string }> = {
+  pass: { color: "var(--pos)", bg: "var(--pos-soft)", mark: "✓" },
+  warn: { color: "var(--gold, #E0B341)", bg: "rgba(224,179,65,0.12)", mark: "!" },
+  info: { color: "var(--text-3)", bg: "var(--surface-2)", mark: "i" },
+};
+
+function IntegrityPanel({ integrity }: { integrity: Integrity | null }) {
+  const [open, setOpen] = useState(false);
+  if (!integrity?.checks?.length) return null;
+  const warns = integrity.checks.filter((c) => c.status === "warn").length;
+  return (
+    <div className="card" style={{ overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "13px 16px",
+        background: "none", border: "none", cursor: "pointer", color: "var(--text-1)", textAlign: "left" }}>
+        <span style={{ color: "var(--pos)" }}><Icon name="sparkles" size={15} fill /></span>
+        <span className="eyebrow" style={{ flex: 1 }}>Integrity checks — no look-ahead, no survivorship cheats</span>
+        <span style={{ fontSize: 12, color: warns ? "var(--gold, #E0B341)" : "var(--pos)" }}>
+          {integrity.checks.length - warns} controlled{warns ? ` · ${warns} disclosed` : ""}
+        </span>
+        <span style={{ color: "var(--text-3)", transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }}>
+          <Icon name="chevronDown" size={14} />
+        </span>
+      </button>
+      {open && (
+        <div style={{ borderTop: "1px solid var(--border)", padding: "6px 0" }}>
+          {integrity.checks.map((c) => {
+            const tone = INTEGRITY_TONE[c.status] ?? INTEGRITY_TONE.info;
+            return (
+              <div key={c.id} style={{ display: "flex", gap: 12, padding: "10px 16px", alignItems: "flex-start" }}>
+                <span className="mono" style={{ width: 20, height: 20, borderRadius: 999, flexShrink: 0, display: "grid", placeItems: "center",
+                  fontSize: 11, fontWeight: 700, color: tone.color, background: tone.bg }}>{tone.mark}</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-1)" }}>{c.label}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.5, marginTop: 2 }}>{c.detail}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function humanizeParam(path: string) {
@@ -104,6 +152,8 @@ function plainMetric(value: any, digits = 2): string {
 export default function BacktestLab({ models, preselectId, initialRegime }: { models: Model[]; preselectId?: number | null; initialRegime?: string }) {
   const [stratId, setStratId] = useState<number>(preselectId || models[0]?.id);
   const [regimeId, setRegimeId] = useState(initialRegime || "gfc");
+  const [customStart, setCustomStart] = useState("2015-01-01");
+  const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().slice(0, 10));
   const [capital, setCapital] = useState(100000);
   const [result, setResult] = useState<Result | null>(null);
   const [running, setRunning] = useState(false);
@@ -115,7 +165,10 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
   const [sweepError, setSweepError] = useState<string | null>(null);
 
   const model = models.find((m) => m.id === stratId) || models[0];
-  const regime = REGIMES.find((r) => r.id === regimeId)!;
+  const isoOk = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const regime = regimeId === "custom"
+    ? { id: "custom", label: "Custom", sub: "Custom window", start: customStart, end: customEnd }
+    : (REGIMES.find((r) => r.id === regimeId) ?? REGIMES[0]);
   const sweepOptions = useMemo(() => numericParams(model?.parameters ?? {}), [model?.id, model?.parameters]);
 
   useEffect(() => {
@@ -162,8 +215,15 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
       setSweepError(e.message || "Sweep failed.");
     } finally { setSweepRunning(false); }
   }
-  // run when the chosen strategy/regime changes (and on mount)
-  useEffect(() => { run(); /* eslint-disable-next-line */ }, [stratId, regimeId]);
+  // Re-run when the user *changes* strategy/regime — but never auto-run on mount:
+  // index-wide models can take minutes on a cold price store, and kicking one off
+  // before the user asked for anything serializes every later run behind it.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return; }
+    if (regimeId !== "custom") run();
+    // eslint-disable-next-line
+  }, [stratId, regimeId]);
 
   const up = result && result.stats.totalRet >= 0;
   const beat = result && result.stats.alpha >= 0;
@@ -185,9 +245,19 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>Historical regime</div>
-          <Segmented options={REGIMES.map((r) => ({ id: r.id, label: r.label }))} value={regimeId} onChange={setRegimeId} size="sm" />
+          <Segmented options={[...REGIMES.map((r) => ({ id: r.id, label: r.label })), { id: "custom", label: "Custom" }]}
+            value={regimeId} onChange={setRegimeId} size="sm" />
         </div>
-        <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{regime.sub} · {regime.start} → {regime.end}</span>
+        {regimeId === "custom" ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <TextInput mono value={customStart} onChange={setCustomStart} placeholder="YYYY-MM-DD" style={{ width: 132, padding: "8px 10px", fontSize: 13 }} />
+            <span style={{ color: "var(--text-3)" }}>→</span>
+            <TextInput mono value={customEnd} onChange={setCustomEnd} placeholder="YYYY-MM-DD" style={{ width: 132, padding: "8px 10px", fontSize: 13 }} />
+            <Btn variant="soft" icon="play" onClick={run} disabled={!isoOk(customStart) || !isoOk(customEnd) || customEnd <= customStart}>Test window</Btn>
+          </div>
+        ) : (
+          <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{regime.sub} · {regime.start} → {regime.end}</span>
+        )}
       </div>
 
       <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
@@ -279,12 +349,20 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
             {result.warnings.length > 0 && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-3)" }}>{result.warnings.slice(0, 2).join(" · ")}</div>}
           </div>
 
+          <IntegrityPanel integrity={result.integrity} />
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
             <Tile label="Total return" value={fmt.pct(result.stats.totalRet)} tone={up ? "pos" : "neg"} big />
             <Tile label="vs S&P 500" value={fmt.pct(result.stats.alpha)} tone={beat ? "pos" : "neg"} big />
             <Tile label="CAGR" value={fmt.pct(result.stats.cagr)} tone={result.stats.cagr >= 0 ? "pos" : "neg"} />
             <Tile label="Max drawdown" value={result.stats.maxDD.toFixed(1) + "%"} tone="neg" />
             {result.stats.winRate > 0 && <Tile label="Win rate" value={result.stats.winRate.toFixed(0) + "%"} />}
+            {result.metrics.sharpe != null && <Tile label="Sharpe" value={plainMetric(result.metrics.sharpe)} tone={result.metrics.sharpe >= 1 ? "pos" : undefined} />}
+            {result.metrics.sortino != null && <Tile label="Sortino" value={plainMetric(result.metrics.sortino)} />}
+            {result.metrics.volatility != null && <Tile label="Volatility (ann.)" value={(result.metrics.volatility * 100).toFixed(1) + "%"} />}
+            {result.metrics.calmar != null && <Tile label="Calmar" value={plainMetric(result.metrics.calmar)} />}
+            {result.metrics.beta != null && <Tile label="Beta" value={plainMetric(result.metrics.beta)} />}
+            {result.metrics.profit_factor != null && <Tile label="Profit factor" value={plainMetric(result.metrics.profit_factor)} />}
           </div>
 
           <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)", gap: 18 }}>

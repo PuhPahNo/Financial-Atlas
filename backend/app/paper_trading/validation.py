@@ -132,7 +132,19 @@ def validate_strategy_config(category: Category | str, parameters: dict[str, Any
 
     rules = params.get("rules")
     if rules is None:
-        if not tickers:
+        model = str(params.get("model") or "").strip().lower()
+        if model:
+            from ..backtesting.screen import MODELS  # late import — avoids module cycles
+            if model not in MODELS:
+                issues.append(_issue("parameters.model", "invalid_choice",
+                                     f"Model '{model}' is not in the model library ({', '.join(sorted(MODELS))})."))
+            params["model"] = model
+            # Index-scanning models need no tickers (they screen the point-in-time S&P 500
+            # universe); fixed-basket models must declare what they rotate across.
+            if str(params.get("universe") or "").lower() in {"tickers", "fixed", "custom"} and not tickers:
+                issues.append(_issue("parameters.tickers", "required",
+                                     "Fixed-universe models need at least one ticker to trade."))
+        elif not tickers:
             issues.append(_issue("parameters.tickers", "required", "At least one ticker is required."))
         return {"valid": not issues, "issues": issues, "warnings": warnings, "parameters": params}
 

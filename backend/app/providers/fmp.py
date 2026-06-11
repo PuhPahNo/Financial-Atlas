@@ -5,9 +5,9 @@ ratios, analyst price-target consensus, and peers. Self-disables without a key.
 """
 from __future__ import annotations
 
-from ..core import cache
+from ..core import cache, quota
 from ..core.config import settings
-from ..core.errors import ProviderError
+from ..core.errors import ProviderError, RateLimitError
 from ..core.http import get_json
 from .base import AnalystSnapshot, Mover, Peer, Quote
 
@@ -30,7 +30,15 @@ class FmpProvider:
 
     def _get(self, path: str, params: dict, ttl: int, key: str):
         def load():
-            return get_json(f"{_BASE}/{path}", params={**params, "apikey": self.key}, provider=self.name)
+            # Daily budget guard (PRD free-data-pipeline): only real network calls count
+            # (cache hits never reach this loader). Past the budget we raise RateLimitError
+            # so get_or_set serves stale data when it has any, and the provider chain
+            # otherwise falls through to keyless sources — the key is never exhausted.
+            if not quota.available(self.name, settings.fmp_daily_budget):
+                raise RateLimitError(f"FMP daily budget ({settings.fmp_daily_budget}) reached")
+            data = get_json(f"{_BASE}/{path}", params={**params, "apikey": self.key}, provider=self.name)
+            quota.spend(self.name)
+            return data
         return cache.get_or_set("fmp", key, ttl_seconds=ttl, loader=load).value
 
     def _movers(self, path: str, key: str) -> list[Mover]:

@@ -59,14 +59,17 @@ export default function PaperTradingPage() {
     [strategies, favorites]
   );
 
-  // Quietly backtest any not-yet-backtested models in the background, ONE AT A TIME, so
-  // every card shows real equity without the user opening each one. Each backtest now scans
-  // the whole S&P 500 universe, so running several at once blows past the instance's memory
-  // limit — a single sequential worker (plus server-side serialization) keeps it safe.
+  // Quietly backtest not-yet-backtested models in the background, ONE AT A TIME — but only
+  // the cheap ones (signal rules and fixed ETF baskets, a handful of tickers each). Index-wide
+  // screeners scan the whole point-in-time S&P 500 and can take minutes on a cold price store;
+  // auto-running them here would hold the backtest engine lock and starve interactive Lab runs.
+  // Those models stay honestly unlabeled until the user runs them (Lab or model detail).
+  const cheap = (m: Model) =>
+    !!m.parameters?.rules || String(m.parameters?.universe ?? "").toLowerCase() === "tickers";
   const warmedRef = useRef(false);
   useEffect(() => {
     if (loading || warmedRef.current) return;
-    const pending = models.filter((m) => !m.backtested);
+    const pending = models.filter((m) => !m.backtested && cheap(m));
     if (!pending.length) return;
     warmedRef.current = true;
     const w = defaultBacktestWindow();

@@ -17,10 +17,12 @@ def _daily(start, end, f):
 
 
 def _stub(series):
-    def pw(sym, *, start, end, interval="1d"):
-        return {"bars": [b for b in series.get(sym, []) if start.isoformat() <= b["date"] <= end.isoformat()],
-                "currency": "USD"}, "stub"
-    return pw
+    # The engine reads prices through the durable price store; tests stub the store's
+    # get_series so nothing touches the network or persists synthetic bars to the DB.
+    def gs(sym, start, end):
+        bars = [b for b in series.get(sym, []) if start.isoformat() <= b["date"] <= end.isoformat()]
+        return [b["date"] for b in bars], [float(b["close"]) for b in bars], "stub"
+    return gs
 
 
 def _sells(res):
@@ -35,7 +37,7 @@ def test_enters_after_uptrend_then_takes_profit(monkeypatch):
             return 100 - 45 * ((d - h0).days / (turn - h0).days)   # decline
         return 55 + 150 * ((d - turn).days / (end - turn).days)    # strong rise -> +25% TP
 
-    monkeypatch.setattr(screen.prices, "price_window",
+    monkeypatch.setattr(screen.price_store, "get_series",
                         _stub({"MOM": _daily(h0, end, price), "SPY": _daily(h0, end, lambda d: 100.0)}))
     res = run_active_backtest(strategy={"category": "short_term", "name": "M", "parameters": {}},
                               universe=["MOM"], start_date=start, end_date=end, starting_cash=10000.0)
@@ -52,7 +54,7 @@ def test_stop_loss_fires(monkeypatch):
             return 50.0  # keeps SMA100 far below entry, so a 12% drop fires before any SMA cross
         return max(40.0, 100.0 - 0.5 * (d - date(2020, 1, 1)).days)
 
-    monkeypatch.setattr(screen.prices, "price_window",
+    monkeypatch.setattr(screen.price_store, "get_series",
                         _stub({"STP": _daily(h0, end, price), "SPY": _daily(h0, end, lambda d: 100.0)}))
     res = run_active_backtest(
         strategy={"category": "short_term", "name": "S", "parameters": {"take_profit_pct": 0.99}},
@@ -63,7 +65,7 @@ def test_stop_loss_fires(monkeypatch):
 def test_max_hold_fires(monkeypatch):
     start, end, h0 = date(2020, 1, 1), date(2020, 6, 30), date(2018, 1, 1)
     price = lambda d: 50 + 10 * ((d - h0).days / (end - h0).days)   # gentle steady uptrend
-    monkeypatch.setattr(screen.prices, "price_window",
+    monkeypatch.setattr(screen.price_store, "get_series",
                         _stub({"SLW": _daily(h0, end, price), "SPY": _daily(h0, end, lambda d: 100.0)}))
     res = run_active_backtest(
         strategy={"category": "short_term", "name": "H",
@@ -77,7 +79,7 @@ def test_never_holds_more_than_top_n(monkeypatch):
     series = {f"T{i}": _daily(h0, end, lambda d, i=i: 50 + (20 + i) * ((d - h0).days / (end - h0).days))
               for i in range(5)}
     series["SPY"] = _daily(h0, end, lambda d: 100.0)
-    monkeypatch.setattr(screen.prices, "price_window", _stub(series))
+    monkeypatch.setattr(screen.price_store, "get_series", _stub(series))
     res = run_active_backtest(
         strategy={"category": "short_term", "name": "N",
                   "parameters": {"max_positions": 2, "take_profit_pct": 0.99, "stop_loss_pct": 0.99}},
@@ -89,7 +91,7 @@ def test_membership_blocks_nonmembers_before_join_date(monkeypatch):
     """A name that qualifies technically is still not bought until it's an index member."""
     start, end, h0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
     rise = lambda d: 50 + 50 * ((d - h0).days / (end - h0).days)   # steady uptrend; both qualify
-    monkeypatch.setattr(screen.prices, "price_window",
+    monkeypatch.setattr(screen.price_store, "get_series",
                         _stub({"OLD": _daily(h0, end, rise), "NEW": _daily(h0, end, rise),
                                "SPY": _daily(h0, end, lambda d: 100.0)}))
 
@@ -114,17 +116,18 @@ def test_dead_ticker_is_skiplisted_and_not_refetched(monkeypatch):
     live = _daily(h0, end, rise)
     calls = {"DEAD": 0}
 
-    def pw(sym, *, start, end, interval="1d"):
+    def gs(sym, start, end):
         if sym == "DEAD":
             calls["DEAD"] += 1
             raise RuntimeError("404 — delisted")
-        return {"bars": [b for b in {"LIVE": live, "SPY": _daily(h0, end, lambda d: 100.0)}.get(sym, [])
-                         if start.isoformat() <= b["date"] <= end.isoformat()], "currency": "USD"}, "stub"
+        bars = [b for b in {"LIVE": live, "SPY": _daily(h0, end, lambda d: 100.0)}.get(sym, [])
+                if start.isoformat() <= b["date"] <= end.isoformat()]
+        return [b["date"] for b in bars], [float(b["close"]) for b in bars], "stub"
 
     store: dict = {}
     monkeypatch.setattr(screen.cache, "peek", lambda ns, k, ttl: store.get((ns, k)))
     monkeypatch.setattr(screen.cache, "put", lambda ns, k, v: store.__setitem__((ns, k), v))
-    monkeypatch.setattr(screen.prices, "price_window", pw)
+    monkeypatch.setattr(screen.price_store, "get_series", gs)
 
     strat = {"category": "short_term", "name": "X", "parameters": {"take_profit_pct": 0.99, "stop_loss_pct": 0.99}}
     screen.run_active_backtest(strategy=strat, universe=["LIVE", "DEAD"], start_date=start, end_date=end, starting_cash=10000.0)
@@ -136,7 +139,7 @@ def test_dead_ticker_is_skiplisted_and_not_refetched(monkeypatch):
 def test_all_cash_when_nothing_qualifies(monkeypatch):
     start, end, h0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
     price = lambda d: 200 - 50 * ((d - h0).days / (end - h0).days)  # strictly declining
-    monkeypatch.setattr(screen.prices, "price_window",
+    monkeypatch.setattr(screen.price_store, "get_series",
                         _stub({"DWN": _daily(h0, end, price), "SPY": _daily(h0, end, lambda d: 100.0)}))
     res = run_active_backtest(strategy={"category": "short_term", "name": "C", "parameters": {}},
                               universe=["DWN"], start_date=start, end_date=end, starting_cash=10000.0)

@@ -173,9 +173,15 @@ class SecEdgarProvider:
         return float(latest[1]) if latest else None
 
     # -- statements ----------------------------------------------------------
-    def get_income_statements(self, ticker: str, *, period: Period = Period.ANNUAL) -> list[IncomeStatement]:
+    # ``point_in_time=True`` returns the *originally filed* value for each period
+    # (earliest filing wins) instead of the latest restatement, so each row's
+    # filing_date is the date the figures first became public knowledge. That is
+    # the correct view for backtests; the default (restated) view is correct for
+    # current-state analysis in the UI.
+    def get_income_statements(self, ticker: str, *, period: Period = Period.ANNUAL,
+                              point_in_time: bool = False) -> list[IncomeStatement]:
         facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
-        rows = _build_periods(facts, INCOME_TAGS, period, instant=False)
+        rows = _build_periods(facts, INCOME_TAGS, period, instant=False, point_in_time=point_in_time)
         out: list[IncomeStatement] = []
         for key, data in rows.items():
             fy, p = key
@@ -184,9 +190,10 @@ class SecEdgarProvider:
             out.append(IncomeStatement(fiscal_year=fy, period=p, source=self.name, **data))
         return _sorted(out)
 
-    def get_balance_sheets(self, ticker: str, *, period: Period = Period.ANNUAL) -> list[BalanceSheet]:
+    def get_balance_sheets(self, ticker: str, *, period: Period = Period.ANNUAL,
+                           point_in_time: bool = False) -> list[BalanceSheet]:
         facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
-        rows = _build_periods(facts, BALANCE_TAGS, period, instant=True)
+        rows = _build_periods(facts, BALANCE_TAGS, period, instant=True, point_in_time=point_in_time)
         out: list[BalanceSheet] = []
         for (fy, p), data in rows.items():
             st, lt = data.get("short_term_debt"), data.get("long_term_debt")
@@ -195,9 +202,10 @@ class SecEdgarProvider:
             out.append(BalanceSheet(fiscal_year=fy, period=p, source=self.name, **data))
         return _sorted(out)
 
-    def get_cash_flows(self, ticker: str, *, period: Period = Period.ANNUAL) -> list[CashFlowStatement]:
+    def get_cash_flows(self, ticker: str, *, period: Period = Period.ANNUAL,
+                       point_in_time: bool = False) -> list[CashFlowStatement]:
         facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
-        rows = _build_periods(facts, CASHFLOW_TAGS, period, instant=False)
+        rows = _build_periods(facts, CASHFLOW_TAGS, period, instant=False, point_in_time=point_in_time)
         out: list[CashFlowStatement] = []
         for (fy, p), data in rows.items():
             ocf, capex = data.get("operating_cash_flow"), data.get("capital_expenditures")
@@ -413,12 +421,16 @@ def _period_key(e: dict, period: Period) -> tuple[int, str] | None:
     return (fy, fp if fp.startswith("Q") else f"Q@{end}")
 
 
-def _build_periods(facts: dict, tag_map: dict[str, list[str]], period: Period, *, instant: bool) -> dict:
+def _build_periods(facts: dict, tag_map: dict[str, list[str]], period: Period, *, instant: bool,
+                   point_in_time: bool = False) -> dict:
     """Return ``{(fiscal_year, period_label): {field: value}}`` for all fields.
 
     For each field we prefer the highest-priority tag (lowest index) that reports a
-    given period; within the same tag we prefer the most-recently-filed value (handles
-    restatements). This makes extraction robust to companies changing tags over time.
+    given period. Within the same tag, the default prefers the most-recently-filed
+    value (restated figures — right for current-state analysis), while
+    ``point_in_time=True`` prefers the *earliest*-filed value (originally-reported
+    figures with original filing dates — right for backtests, where using restated
+    numbers or late comparative filing dates would leak future knowledge).
     """
     rows: dict[tuple[int, str], dict] = {}
     chosen: dict[tuple, tuple[int, str]] = {}  # (key, field) -> (priority, filed)
@@ -447,9 +459,23 @@ def _build_periods(facts: dict, tag_map: dict[str, list[str]], period: Period, *
                 marker_key = (key, field)
                 filed = e.get("filed", "")
                 prev = chosen.get(marker_key)
-                # keep existing unless: higher-priority tag, or same priority filed more recently
-                if prev is not None and (prev[0] < priority or (prev[0] == priority and filed < prev[1])):
-                    continue
+                if point_in_time:
+                    # The earliest filing wins regardless of tag preference — it is what an
+                    # investor actually knew first. (Companies switch tags over time, e.g.
+                    # ASC-606 revenue: the preferred tag's first appearance is often a later
+                    # comparative filing, and choosing it would hide the row for a year.)
+                    # Tag priority only breaks ties within the same filing. Undated entries
+                    # can't be gated, so they are skipped entirely.
+                    if not filed:
+                        continue
+                    if prev is not None and (prev[1] < filed or (prev[1] == filed and prev[0] <= priority)):
+                        continue
+                else:
+                    if prev is not None:
+                        if prev[0] < priority:
+                            continue  # a higher-priority tag already filled this field
+                        if prev[0] == priority and filed < prev[1]:
+                            continue  # same tag: keep the most recent restatement
                 chosen[marker_key] = (priority, filed)
                 row = rows.setdefault(key, {})
                 row[field] = float(val)
@@ -457,6 +483,22 @@ def _build_periods(facts: dict, tag_map: dict[str, list[str]], period: Period, *
                     row["filing_date"] = e["filed"]
                 if e.get("accn"):
                     row["filing_ref"] = e["accn"]
+    if point_in_time:
+        # A row becomes public knowledge when its statement was *originally* filed — the
+        # earliest filing across its fields. Fields whose first tagged appearance is a
+        # *later* filing (tag-scheme changes, restated comparatives) were not knowable
+        # then, so they are dropped rather than allowed to either leak future data or
+        # (via a max() gate) hide the whole row for a year.
+        for key, row in rows.items():
+            filed_dates = [chosen[(key, f)][1] for f in tag_map if (key, f) in chosen and chosen[(key, f)][1]]
+            if not filed_dates:
+                continue
+            original = min(filed_dates)
+            for f in tag_map:
+                marker = (key, f)
+                if marker in chosen and chosen[marker][1] > original:
+                    row[f] = None
+            row["filing_date"] = original
     return rows
 
 

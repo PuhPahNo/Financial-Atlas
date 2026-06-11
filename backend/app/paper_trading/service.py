@@ -62,6 +62,17 @@ def ensure_seeded() -> None:
             slug = _slug(seed["name"])
             existing = session.query(TradingStrategy).filter_by(slug=slug).first()
             if existing:
+                # The catalogue is the source of truth for seeded *content* — sync text and
+                # parameters so deployed DBs pick up model upgrades, but never touch
+                # metrics_json: it accumulates the user's real backtest headline.
+                if existing.origin == "seeded" and existing.status == "active":
+                    existing.category = seed["category"]
+                    existing.description = seed.get("description", "")
+                    existing.history = seed.get("history", "")
+                    existing.methodology = seed.get("methodology", "")
+                    existing.parameters_json = seed.get("parameters", {})
+                    existing.defaults_json = seed.get("defaults", {})
+                    existing.caveats_json = seed.get("caveats", [])
                 continue
             session.add(TradingStrategy(
                 category=seed["category"],
@@ -214,6 +225,7 @@ def _run_view(run: BacktestRun) -> dict:
         "strategy_snapshot": inputs.get("strategy_snapshot"),
         "metrics": run.metrics_json or {},
         "warnings": run.warnings_json or [],
+        "integrity": inputs.get("integrity"),
         "trades": [{
             "date": trade.trade_date.isoformat(),
             "ticker": trade.ticker,
@@ -320,7 +332,8 @@ def run_backtest(payload: BacktestRequest) -> dict:
         start_date=payload.start_date,
         end_date=payload.end_date,
         starting_cash=payload.starting_cash,
-        inputs=_inputs_with_snapshot(payload.model_dump(mode="json"), strategy_view),
+        inputs=_inputs_with_snapshot(payload.model_dump(mode="json"), strategy_view,
+                                     {"integrity": result.get("integrity")}),
         result=result,
     )
 

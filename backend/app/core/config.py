@@ -51,6 +51,10 @@ class Settings(BaseSettings):
 
     # Optional provider API keys (all blank by default => those providers self-disable).
     fmp_api_key: str = ""
+    # Daily FMP call budget (free tier ≈ 250/day). Real network calls past this raise a
+    # RateLimitError so chains degrade to keyless providers instead of exhausting the key.
+    # Kept under the hard cap to leave headroom for interactive use. 0 disables the guard.
+    fmp_daily_budget: int = 180
     alpha_vantage_api_key: str = ""
     twelve_data_api_key: str = ""
     finnhub_api_key: str = ""
