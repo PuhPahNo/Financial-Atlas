@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,15 +49,66 @@ async def _live_mark_loop() -> None:
             log.warning("live-mark tick error: %s", exc)
 
 
+async def _data_maintenance_loop() -> None:
+    """Nightly free-data maintenance, in-process (PRD free-data-pipeline).
+
+    Warms the durable price store + PIT fundamentals for the investable superset, then
+    refreshes every model card's headline backtest so stored numbers always come from
+    the current engine. Also runs once shortly after boot when the price store is cold
+    (fresh deploy / wiped DB) — production primes itself with no manual steps. Same
+    resilience contract as the live-mark loop: nothing here can kill the loop, and
+    correctness never depends on it (on-demand paths self-heal).
+    """
+    maint_log = logging.getLogger("app.data_maintenance")
+
+    async def run_all(reason: str) -> None:
+        from .jobs import refresh_headlines, warm_prices
+        maint_log.info("data maintenance (%s): warming price store + fundamentals", reason)
+        warmed = await asyncio.to_thread(warm_prices.run)
+        maint_log.info("data maintenance (%s): warm done %s; refreshing headlines", reason, warmed)
+        refreshed = await asyncio.to_thread(refresh_headlines.run)
+        maint_log.info("data maintenance (%s) complete: refreshed=%s failed=%s", reason,
+                       refreshed.get("refreshed"), len(refreshed.get("failed") or []))
+
+    await asyncio.sleep(120)  # let boot settle before any heavy work
+    try:
+        from .db import PriceSeries, session_scope
+        with session_scope() as s:
+            stored = s.query(PriceSeries).count()
+        if stored < 50:  # cold store → fresh deploy or wiped DB
+            await run_all("bootstrap")
+    except Exception as exc:  # noqa: BLE001
+        maint_log.warning("data maintenance bootstrap error: %s", exc)
+
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            target = now.replace(hour=settings.data_maintenance_utc_hour, minute=30,
+                                 second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            await asyncio.sleep((target - now).total_seconds())
+            await run_all("nightly")
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:  # noqa: BLE001 — keep the loop alive across transient errors
+            maint_log.warning("data maintenance error: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()  # idempotent; ensures tables exist when started via uvicorn lifespan
-    task = asyncio.create_task(_live_mark_loop()) if settings.live_mark_enabled else None
+    tasks = []
+    if settings.live_mark_enabled:
+        tasks.append(asyncio.create_task(_live_mark_loop()))
+    if settings.data_maintenance_enabled:
+        tasks.append(asyncio.create_task(_data_maintenance_loop()))
     try:
         yield
     finally:
-        if task is not None:
+        for task in tasks:
             task.cancel()
+        for task in tasks:
             try:
                 await task
             except asyncio.CancelledError:

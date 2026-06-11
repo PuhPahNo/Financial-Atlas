@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     live_mark_interval_seconds: int = 60
     live_quote_ttl_seconds: int = 60
 
+    # Nightly in-process data maintenance (PRD free-data-pipeline): warms the durable
+    # price store + PIT fundamentals, then refreshes every model card's headline backtest
+    # on the current engine. Runs inside the single web service (same pattern as the
+    # live-mark loop — no extra Render service). Also bootstraps once shortly after boot
+    # when the price store is cold (fresh deploy / wiped DB) so cards self-populate.
+    data_maintenance_enabled: bool = True
+    data_maintenance_utc_hour: int = 8  # 08:30 UTC ≈ hours before the US open
+
     # Backtests scan the S&P 500 as it was on each historical date (point-in-time membership
     # reconstructed free from the published change-log). Set false to scan today's list only.
     backtest_point_in_time_membership: bool = True
