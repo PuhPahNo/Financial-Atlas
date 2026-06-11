@@ -382,13 +382,13 @@ def run_backtest(
     spec = parse_rules(strategy)
     tickers = tickers or strategy.get("parameters", {}).get("tickers", [])
     instrument = (spec["instrument"] if spec else (tickers[0] if tickers else "")).upper()
-    if not instrument:
-        raise ValidationError("At least one ticker is required")
 
     # Real catalogue (non-rule) strategies are actively managed over the whole S&P 500: each
     # day, scan the index and buy names that newly meet the model's criteria (point-in-time),
     # exit on take-profit / stop-loss / max-hold / criteria-break. The model's own tickers are
-    # folded in as extra candidates. Fixtures and rule-based models keep their existing paths.
+    # folded in as extra candidates — an empty tickers list is valid here (index-scanning
+    # models declare no basket of their own). Fixtures and rule-based models keep their
+    # existing paths and still require an instrument (checked below).
     if spec is None and not use_fixture_data:
         params = strategy.get("parameters", {}) or {}
         model_t = {t.strip().upper().replace(".", "-") for t in tickers if t and t.strip()}
@@ -414,6 +414,9 @@ def run_backtest(
             starting_cash=starting_cash, transaction_cost_bps=transaction_cost_bps,
             slippage_bps=slippage_bps, benchmark=benchmark, membership_on=membership,
         )
+
+    if not instrument:
+        raise ValidationError("At least one ticker is required")
 
     warnings: list[str] = []
     cost_rate = (transaction_cost_bps + slippage_bps) / 10000

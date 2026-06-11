@@ -43,6 +43,24 @@ def test_real_backtest_routes_through_active_screening_with_integrity_report(mon
     assert not any("look-ahead" in w.lower() for w in res["warnings"])
 
 
+def test_index_models_need_no_tickers(monkeypatch):
+    """Index-scanning models (Piotroski, Magic Formula, …) declare no tickers of their
+    own — they must route to the active screener, not fail 'at least one ticker'."""
+    start, end, hist0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
+    import app.backtesting.screen as s
+    import app.backtesting.engine as eng
+    rise = lambda d: 50 + 50 * ((d - hist0).days / (end - hist0).days)
+    series = {"AAA": _daily(hist0, end, rise), "SPY": _daily(hist0, end, lambda d: 100.0)}
+    monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
+    monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])
+    monkeypatch.setattr(eng.univ, "members_on", lambda d: {"AAA"})
+
+    res = eng.run_backtest(
+        strategy={"category": "short_term", "name": "Mom", "parameters": {"model": "momentum_12_1", "tickers": []}},
+        tickers=[], start_date=start, end_date=end, starting_cash=10000.0)
+    assert res["integrity"]["checks"]  # routed through the active screener, not an error
+
+
 def test_fixed_basket_models_trade_only_their_tickers(monkeypatch):
     """A model declaring universe=tickers (e.g. ETF rotation) trades only its own basket —
     the S&P superset is never scanned and the integrity report marks the fixed universe."""
