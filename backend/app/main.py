@@ -70,12 +70,26 @@ async def _data_maintenance_loop() -> None:
         maint_log.info("data maintenance (%s) complete: refreshed=%s failed=%s", reason,
                        refreshed.get("refreshed"), len(refreshed.get("failed") or []))
 
+    def needs_bootstrap() -> bool:
+        """Cold price store (fresh deploy / wiped DB) — or no seeded model carries a
+        recent headline (an interrupted bootstrap, or an engine change since the last
+        refresh). Once one full refresh lands, redeploys skip this and the nightly
+        run takes over."""
+        from .db import PriceSeries, session_scope
+        from .models.paper_trading import TradingStrategy
+        with session_scope() as s:
+            if s.query(PriceSeries).count() < 50:
+                return True
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
+            for row in s.query(TradingStrategy).filter_by(status="active", origin="seeded").all():
+                window = ((row.metrics_json or {}).get("_backtest") or {}).get("window") or {}
+                if (window.get("end") or "") >= cutoff:
+                    return False
+            return True
+
     await asyncio.sleep(120)  # let boot settle before any heavy work
     try:
-        from .db import PriceSeries, session_scope
-        with session_scope() as s:
-            stored = s.query(PriceSeries).count()
-        if stored < 50:  # cold store → fresh deploy or wiped DB
+        if needs_bootstrap():
             await run_all("bootstrap")
     except Exception as exc:  # noqa: BLE001
         maint_log.warning("data maintenance bootstrap error: %s", exc)

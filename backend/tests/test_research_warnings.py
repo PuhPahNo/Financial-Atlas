@@ -53,8 +53,9 @@ def test_peers_drops_fmp_note_when_finnhub_fallback_succeeds(monkeypatch):
 
 
 def test_finnhub_peers_enriched_with_name_and_market_cap(monkeypatch):
-    # Finnhub returns bare tickers; we backfill name (SEC map) + market cap (FMP quote)
-    # so the table renders fully instead of a column of dashes.
+    # Finnhub returns bare tickers; we backfill name (SEC map) + market cap
+    # (free-first: snapshot → EDGAR×Yahoo → FMP) so the table renders fully
+    # instead of a column of dashes.
     from app.providers.base import Quote
 
     monkeypatch.setattr(research.cache.settings, "cache_enabled", False)
@@ -63,6 +64,8 @@ def test_finnhub_peers_enriched_with_name_and_market_cap(monkeypatch):
     monkeypatch.setattr(research.fmp, "get_peers", lambda _t: [])  # premium / empty
     monkeypatch.setattr(research.finnhub, "get_peers", lambda _t: ["MSFT"])
     monkeypatch.setattr(research.sec_edgar, "resolve_cik", lambda t: {"cik": "0", "title": "Microsoft Corp"})
+    monkeypatch.setattr(research, "_snapshot_market_cap", lambda _t: None)
+    monkeypatch.setattr(research, "_computed_market_cap", lambda _t: None)
     monkeypatch.setattr(research.fmp, "get_quote", lambda t: Quote(price=400.0, market_cap=3_000_000_000_000))
 
     result = research.peers("AAPL")
@@ -75,6 +78,19 @@ def test_finnhub_peers_enriched_with_name_and_market_cap(monkeypatch):
     assert result["warnings"] == []
 
 
+def test_peer_market_cap_prefers_free_sources_over_fmp(monkeypatch):
+    # FMP's quota is the scarcest resource: when a free source (screener snapshot,
+    # EDGAR shares × Yahoo price) can answer, FMP must not be touched at all.
+    monkeypatch.setattr(research.cache.settings, "cache_enabled", False)
+    monkeypatch.setattr(research, "_snapshot_market_cap", lambda _t: 2_500_000_000_000)
+
+    def explode(_t):
+        raise AssertionError("FMP must not be called when a free source answers")
+
+    monkeypatch.setattr(research.fmp, "get_quote", explode)
+    assert research._peer_market_cap("MSFT") == 2_500_000_000_000
+
+
 def test_peer_market_cap_cached_to_protect_fmp_quota(monkeypatch, tmp_path):
     # The 12h peer-market-cap cache must spare FMP's free quota: a second lookup
     # within the window hits the cache, not the API.
@@ -83,6 +99,8 @@ def test_peer_market_cap_cached_to_protect_fmp_quota(monkeypatch, tmp_path):
     monkeypatch.setattr(research.cache.settings, "cache_dir", tmp_path)
     monkeypatch.setattr(research.cache.settings, "cache_enabled", True)
     monkeypatch.setattr(research.fmp, "key", "fixture")
+    monkeypatch.setattr(research, "_snapshot_market_cap", lambda _t: None)
+    monkeypatch.setattr(research, "_computed_market_cap", lambda _t: None)
 
     calls = {"n": 0}
 

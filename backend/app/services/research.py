@@ -27,20 +27,51 @@ def _peer_name(ticker: str) -> str | None:
         return None
 
 
-def _peer_market_cap(ticker: str) -> float | None:
-    """Market cap from FMP's free quote endpoint, cached ~half a day so peer
-    enrichment can't burn FMP's free daily quota. Only successful values are
-    cached, so a transient failure isn't sticky for 12 hours."""
+def _snapshot_market_cap(ticker: str) -> float | None:
+    """Market cap from the local screener snapshot — zero network."""
+    try:
+        from ..db import CompanySnapshot, session_scope
+        with session_scope() as s:
+            row = s.get(CompanySnapshot, ticker)
+            return row.market_cap if row else None
+    except Exception:
+        return None
+
+
+def _computed_market_cap(ticker: str) -> float | None:
+    """Shares outstanding (EDGAR, cached ~30d) × latest price (Yahoo chain, cached).
+    Entirely free-tier-safe — works even with FMP's daily quota exhausted."""
+    try:
+        shares = sec_edgar.get_company_profile(ticker).shares_outstanding
+        if not shares:
+            return None
+        from . import prices
+        quote, _ = prices.quote(ticker)
+        return shares * quote.price if quote.price else None
+    except Exception:
+        return None
+
+
+def _fmp_market_cap(ticker: str) -> float | None:
     if not fmp.enabled:
         return None
+    try:
+        return fmp.get_quote(ticker).market_cap
+    except Exception:
+        return None
+
+
+def _peer_market_cap(ticker: str) -> float | None:
+    """Peer market cap, cached ~half a day. Sourced free-first: the local screener
+    snapshot, then EDGAR shares × Yahoo price, and only then FMP's quote endpoint —
+    peer tables previously went blank whenever FMP's daily quota ran out, because
+    this was FMP-only. Only successful values are cached, so a transient failure
+    isn't sticky for 12 hours."""
     key = ticker.upper()
     cached = cache.peek("peer_mktcap", key, ttl_seconds=_PEER_MARKET_CAP_TTL)
     if cached is not None:
         return cached
-    try:
-        market_cap = fmp.get_quote(ticker).market_cap
-    except Exception:
-        return None
+    market_cap = _snapshot_market_cap(key) or _computed_market_cap(key) or _fmp_market_cap(key)
     if market_cap is not None:
         cache.put("peer_mktcap", key, market_cap)
     return market_cap

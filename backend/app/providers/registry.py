@@ -28,7 +28,12 @@ CHAINS = {
     "balance": [sec_edgar],
     "cashflow": [sec_edgar],
     "prices": [yahoo, stooq],          # Stooq (keyless EOD) catches a Yahoo outage
-    "quote": [fmp, yahoo, stooq],      # FMP is fresher; Yahoo, then Stooq fallback
+    # Yahoo first for quotes: the live-mark tick re-quotes every account ticker each
+    # minute of the trading day, and routing that through FMP burned the entire free
+    # daily quota (~250) before lunch — starving peer enrichment and analyst data.
+    # Yahoo absorbs the high-frequency traffic (≈15-min delayed, fine per PRD);
+    # FMP's quota is reserved for what only it provides.
+    "quote": [yahoo, fmp, stooq],
     "insider": [sec_edgar],
     "institutional": [sec_edgar],
     "filings": [sec_edgar],
