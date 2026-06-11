@@ -38,3 +38,11 @@ def warm_backtest_data(years: int = 25, include_fundamentals: bool = True):
     so subsequent backtests run from local data (best-effort, long-running)."""
     from ..jobs import warm_prices
     return envelope(warm_prices.run(years=years, include_fundamentals=include_fundamentals))
+
+
+@router.post("/backtests/refresh-headlines")
+def refresh_headlines(years: int = 3):
+    """Re-run every active strategy's headline backtest with the current engine and
+    persist it onto the card (best-effort, long-running). Run after /backtests/warm."""
+    from ..jobs import refresh_headlines as job
+    return envelope(job.run(years=years))
