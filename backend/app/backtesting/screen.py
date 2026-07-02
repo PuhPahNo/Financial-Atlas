@@ -26,6 +26,7 @@ entry-vs-price term, keeping net liquidation conserved.
 from __future__ import annotations
 
 import threading
+from bisect import bisect_left
 from datetime import date, timedelta
 
 from ..core import cache
@@ -50,6 +51,11 @@ _DEAD_TTL = 7 * 86400
 
 _UNIVERSE_CAVEAT = ("Candidate universe is user-specified or current-day; survivorship/"
                     "selection bias is not modeled (historical index membership absent).")
+
+# A held position whose price series stops updating (halt / delisting) is force-closed
+# at its last available close once this many calendar days pass without a new bar —
+# otherwise the frozen mark would report a delisting as a ~0% exit at max-hold.
+_STALE_EXIT_DAYS = 7
 
 
 def _is_dead(ticker: str) -> bool:
@@ -428,6 +434,14 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
                 continue
         if not series:
             raise ValidationError("No price history available for the universe in this window")
+        # Coverage disclosure — a run over a silently truncated universe looks identical
+        # to a full one, so say exactly how many names couldn't be priced.
+        missing = [t for t in universe if t not in series]
+        if missing:
+            shown = ", ".join(missing[:8]) + ("…" if len(missing) > 8 else "")
+            warnings.append(
+                f"{len(missing)} of {len(universe)} universe names had no loadable price "
+                f"history in this window (delisted or provider gaps): {shown}")
 
         bench_dates: list[str] = []
         bench_closes: list[float] = []
@@ -448,6 +462,14 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
             ds, cs = series[sym]
             return factors.close_at(ds, cs, d)
 
+        def bar_on(sym: str, d) -> float | None:
+            """Close only if the ticker actually traded on day d — fills and price-
+            triggered exits must never execute at a stale carried-forward close."""
+            ds, cs = series[sym]
+            iso = d.isoformat()
+            i = bisect_left(ds, iso)
+            return cs[i] if i < len(ds) and ds[i] == iso else None
+
         cash = float(starting_cash)
         positions: dict[str, dict] = {}
         trades: list[dict] = []
@@ -465,8 +487,26 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
             # 1) Exits — take-profit / stop-loss / max-hold / criteria-break, whichever first.
             for t in list(positions):
                 p = positions[t]
-                px = close(t, d)
+                px = bar_on(t, d)
                 if px is None:
+                    # No bar today. If the series has ENDED (halt/delisting), force-close at
+                    # the last available close with an explicit reason — never freeze the
+                    # position at a stale price until max-hold reports a fake ~0% exit.
+                    last_iso = series[t][0][-1]
+                    if last_iso < d.isoformat() and (d - date.fromisoformat(last_iso)).days > _STALE_EXIT_DAYS:
+                        last_px = close(t, d) or p["entry_price"]
+                        pnl = (p["qty"] * (last_px - p["entry_price"]) if p["direction"] == "long"
+                               else p["qty"] * (p["entry_price"] - last_px))
+                        cash += pnl if p["direction"] == "short" else p["qty"] * last_px
+                        cash -= p["qty"] * last_px * cost_rate
+                        trades.append({"date": d, "ticker": t,
+                                       "side": "cover" if p["direction"] == "short" else "sell",
+                                       "quantity": p["qty"], "price": last_px, "value": abs(p["qty"] * last_px),
+                                       "reason": "data ended (halt/delisting)", "pnl": pnl})
+                        warnings.append(
+                            f"{t}: price history ends {last_iso} mid-window; position closed at the "
+                            "last available price (real delisting proceeds may differ).")
+                        del positions[t]
                     continue
                 gain = (px / p["entry_price"] - 1) if p["direction"] == "long" else (p["entry_price"] / px - 1)
                 held = (d - p["entry_date"]).days
@@ -506,9 +546,9 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
                     ok, score, direction = eligible(category, params, t, sig, dates, closes)
                     if not ok:
                         continue
-                    fill_px = close(t, d)
+                    fill_px = bar_on(t, d)
                     if fill_px is None or fill_px <= 0:
-                        continue  # no tradable bar today — no fill
+                        continue  # the ticker didn't trade today — no fill at a stale close
                     cands.append((score, t, direction, fill_px))
                 cands.sort(key=lambda x: x[0], reverse=True)
                 for score, t, direction, px in cands:

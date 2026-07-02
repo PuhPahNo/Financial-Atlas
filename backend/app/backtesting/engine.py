@@ -406,7 +406,10 @@ def run_backtest(
         if cap and cap > 0 and len(superset) > cap:  # safety backstop (0 = unlimited)
             superset = sorted(model_t | set(superset[:cap]))
         membership = None
-        if settings.backtest_point_in_time_membership:
+        # Only claim point-in-time membership when the change-log is actually loadable —
+        # otherwise members_on() degrades to today's survivors, and running without the
+        # lambda makes the integrity report say so (warn) instead of lying (pass).
+        if settings.backtest_point_in_time_membership and univ.membership_available():
             etfs = {s.upper() for s in univ.ETF_UNIVERSE}
             membership = lambda d: univ.members_on(d) | etfs | model_t  # noqa: E731
         return run_active_backtest(

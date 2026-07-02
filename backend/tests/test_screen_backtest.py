@@ -31,6 +31,7 @@ def test_real_backtest_routes_through_active_screening_with_integrity_report(mon
     monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
     monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])   # avoid network fetches
     monkeypatch.setattr(eng.univ, "members_on", lambda d: {"AAA"})
+    monkeypatch.setattr(eng.univ, "membership_available", lambda: True)  # change-log loadable
 
     res = eng.run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
                            tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)
@@ -41,6 +42,24 @@ def test_real_backtest_routes_through_active_screening_with_integrity_report(mon
     assert checks["execution"] == "pass"
     assert not any("survivorship" in w.lower() for w in res["warnings"])
     assert not any("look-ahead" in w.lower() for w in res["warnings"])
+
+
+def test_membership_degrades_to_warn_when_changelog_unavailable(monkeypatch):
+    """If the S&P change-log can't be loaded, the run must DISCLOSE that it screened
+    today's survivors (membership warn + universe caveat) — never grade itself pass."""
+    start, end, hist0 = date(2020, 1, 1), date(2021, 12, 31), date(2018, 1, 1)
+    import app.backtesting.screen as s
+    import app.backtesting.engine as eng
+    series = {"AAA": _daily(hist0, end, lambda d: 100.0), "SPY": _daily(hist0, end, lambda d: 100.0)}
+    monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
+    monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])
+    monkeypatch.setattr(eng.univ, "membership_available", lambda: False)  # change-log outage
+
+    res = eng.run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
+                           tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)
+    checks = {c["id"]: c["status"] for c in res["integrity"]["checks"]}
+    assert checks["membership"] == "warn"
+    assert any("survivorship" in w.lower() for w in res["warnings"])
 
 
 def test_index_models_need_no_tickers(monkeypatch):

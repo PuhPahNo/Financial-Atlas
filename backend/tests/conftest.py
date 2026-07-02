@@ -1,11 +1,27 @@
+import os
+import tempfile
+
+# --- Test isolation --------------------------------------------------------
+# The SQLAlchemy engine binds settings.database_url AT IMPORT TIME, so these
+# overrides must run before any `app.` import. Without them the suite reads and
+# WRITES the real dev atlas.db: the name-based cleanup below then orphans
+# backtest_runs rows, and SQLite id reuse attaches those ghosts to future real
+# strategies. The cache override keeps tests from poisoning the dev dead-ticker
+# skiplist and provider-quota counters.
+_TEST_TMP = tempfile.mkdtemp(prefix="atlas-test-")
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEST_TMP}/test.db")
+os.environ.setdefault("CACHE_DIR", f"{_TEST_TMP}/cache")
+
 import pytest
 
 from app.core.rate_limit import reset_rate_limits
-from app.db import session_scope
+from app.db import init_db, session_scope
 from app.db import CompanySnapshot, PitFundamental, Watchlist, WatchlistItem
 from app.models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
 from app.models.paper_trading import BacktestRun, PaperPortfolio, TraderAccount, TradingStrategy
 from app.models.valuation import ValuationResult
+
+init_db()  # the fresh temp DB needs its tables before any test touches it
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +84,7 @@ def cleanup_feature_test_records():
                 "Assistant Rebalance A",
                 "Assistant Rebalance B",
                 "Assistant Retry Model",
+                "Test Queue Rule",
             ])
         ).all()
         for strategy in strategies:

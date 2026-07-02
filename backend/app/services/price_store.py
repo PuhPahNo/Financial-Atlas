@@ -30,8 +30,11 @@ logger = logging.getLogger(__name__)
 
 # Overlap bars compared on every tail merge; > _READJUST_TOLERANCE relative drift on any
 # of them means the provider re-based its adjusted series (split/dividend) → full refetch.
+# The tolerance must sit BELOW a typical quarterly dividend's re-basing ratio (~0.1–0.4%
+# for large caps) or those re-basings pass the check and history silently decays toward
+# split-only prices. Float/rounding noise in provider adjcloses is far below 0.05%.
 _OVERLAP_BARS = 5
-_READJUST_TOLERANCE = 0.005
+_READJUST_TOLERANCE = 0.0005
 
 
 def _iso(d: date | str) -> str:
@@ -40,10 +43,16 @@ def _iso(d: date | str) -> str:
 
 def _bars_to_arrays(payload: dict) -> tuple[list[str], list[float]]:
     """Compact ascending (dates, adjusted_closes) from a price_window payload.
-    Prefers adjusted_close (Yahoo adjclose; Stooq closes are already split-adjusted)."""
+
+    Uses adjusted_close when the payload carries it (Yahoo adjclose), else raw close
+    (Stooq closes are already split-adjusted). Never mixes the two bases within one
+    series: if any bar has an adjusted close, bars without one are dropped rather
+    than silently falling back to a different adjustment basis."""
+    bars = payload["bars"]
+    has_adj = any(b.get("adjusted_close") is not None for b in bars)
+    key = "adjusted_close" if has_adj else "close"
     rows = sorted(
-        ((str(b["date"])[:10], float(b.get("adjusted_close") if b.get("adjusted_close") is not None else b["close"]))
-         for b in payload["bars"] if (b.get("adjusted_close") is not None or b.get("close") is not None)),
+        ((str(b["date"])[:10], float(b[key])) for b in bars if b.get(key) is not None),
         key=lambda r: r[0],
     )
     return [r[0] for r in rows], [r[1] for r in rows]
@@ -182,3 +191,35 @@ def coverage(ticker: str) -> dict | None:
     if not stored:
         return None
     return {"start": stored["dates"][0], "end": stored["dates"][-1], "bars": len(stored["dates"])}
+
+
+def stored_tickers() -> list[str]:
+    """Every ticker with a stored series, sorted."""
+    with session_scope() as s:
+        return sorted(t for (t,) in s.query(PriceSeries.ticker).all())
+
+
+def deep_refresh(ticker: str) -> bool:
+    """Full-history refetch that replaces the stored series wholesale.
+
+    The tail-merge overlap check only compares recent bars, so adjustment drift in
+    OLD bars (e.g. dividends that slipped under the previous tolerance) persists
+    until something refetches the whole series. The nightly warm job rotates this
+    over the store so every series heals within a couple of weeks."""
+    tk = ticker.strip().upper()
+    stored = _read(tk)
+    start = date.fromisoformat(stored["dates"][0]) if stored else date(2000, 1, 1)
+    try:
+        dates, closes, source = _fetch(tk, start, date.today())
+    except Exception:  # noqa: BLE001 — keep the stored series on provider failure
+        logger.info("deep refresh fetch failed for %s; keeping stored series", tk)
+        return False
+    if not dates:
+        return False
+    # Never replace a long history with a stub response (partial provider outage).
+    if stored and len(dates) < len(stored["dates"]) // 2:
+        logger.warning("deep refresh for %s returned %d bars vs %d stored; keeping stored",
+                       tk, len(dates), len(stored["dates"]))
+        return False
+    _write(tk, dates, closes, source)
+    return True

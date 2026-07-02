@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import time
 from datetime import date
 from functools import lru_cache
 
@@ -18,9 +19,12 @@ from ..core.http import get_text
 # Free, stable, keyless CSV of current S&P 500 constituents (Symbol in column 1).
 _SP500_CSV = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
 
-# Free, keyless CSV of S&P 500 add/remove changes (date, added, removed). Best-effort:
-# if unreachable, membership reconstruction degrades to the current list (no regression).
-_SP500_CHANGES_CSV = "https://raw.githubusercontent.com/fja05680/sp500/master/sp500_changes.csv"
+# Free, keyless CSV of per-ticker S&P 500 membership stints (ticker,start_date,end_date;
+# empty end = still a member; multiple rows per ticker for re-additions). This replaced
+# the repo's old sp500_changes.csv, which upstream deleted — fetches 404'd and PIT
+# membership silently degraded to today's list for a while. Interval data is also more
+# robust than change-log reversal: membership is a direct date-range check.
+_SP500_MEMBERSHIP_CSV = "https://raw.githubusercontent.com/fja05680/sp500/master/sp500_ticker_start_end.csv"
 
 # Curated major ETFs / index funds (no EDGAR fundamentals → eligible for technical/rotation
 # models, skipped by fundamental ones). Bundled and deterministic.
@@ -107,9 +111,8 @@ def _to_iso(value: str) -> str | None:
     return None
 
 
-def _parse_changes(text: str) -> list[dict]:
-    """Parse a change-log CSV into [{date, added, removed}] (best-effort, header-aware).
-    Uses a real CSV reader so quoted date cells like "March 2, 2020" parse correctly."""
+def _parse_membership(text: str) -> list[dict]:
+    """Parse the per-ticker stint CSV into [{ticker, start, end|None}] (header-aware)."""
     rows = [r for r in csv.reader(io.StringIO(text)) if any(c.strip() for c in r)]
     if not rows:
         return []
@@ -121,72 +124,91 @@ def _parse_changes(text: str) -> list[dict]:
                 return i
         return None
 
-    di, ai, ri = col("date"), col("added", "add"), col("removed", "remove")
-    if di is None or (ai is None and ri is None):
+    ti, si, ei = col("ticker", "symbol"), col("start"), col("end")
+    if ti is None or si is None:
         return []
     out: list[dict] = []
     for cells in rows[1:]:
-        if di >= len(cells):
+        if max(ti, si) >= len(cells):
             continue
-        iso = _to_iso(cells[di])
-        if not iso:
-            continue
-        added = _norm(cells[ai]) if (ai is not None and ai < len(cells) and cells[ai].strip()) else ""
-        removed = _norm(cells[ri]) if (ri is not None and ri < len(cells) and cells[ri].strip()) else ""
-        if added or removed:
-            out.append({"date": iso, "added": added, "removed": removed})
+        ticker = _norm(cells[ti])
+        start = _to_iso(cells[si])
+        end = _to_iso(cells[ei]) if (ei is not None and ei < len(cells) and cells[ei].strip()) else None
+        if ticker and start:
+            out.append({"ticker": ticker, "start": start, "end": end})
     return out
 
 
-def _changes() -> list[dict]:
-    """S&P 500 add/remove change-log, cached ~30 days. Returns [] on any failure, in which
-    case membership reconstruction degrades to the current list (no regression)."""
+# Negative cache: after a membership-data failure, don't re-attempt the fetch on every
+# members_on() call (a single backtest asks for hundreds of dates).
+_membership_retry_at: float = 0.0
+
+
+def _membership() -> list[dict] | None:
+    """Per-ticker S&P 500 membership stints, cached ~30 days.
+
+    Returns ``None`` when the data is unavailable (fetch failed / parsed empty) so
+    callers can DISCLOSE the degradation instead of silently screening today's
+    survivors under a point-in-time label."""
+    global _membership_retry_at
+    if time.monotonic() < _membership_retry_at:
+        return None
+
     def load():
-        text = get_text(_SP500_CHANGES_CSV, headers={"User-Agent": "Financial Atlas research tool"}, provider="universe")
-        return _parse_changes(text)
+        text = get_text(_SP500_MEMBERSHIP_CSV, headers={"User-Agent": "Financial Atlas research tool"}, provider="universe")
+        parsed = _parse_membership(text)
+        if len(parsed) < 100:  # sanity floor — an error page or truncated body must not pass
+            raise ValueError("S&P 500 membership CSV parsed too small")
+        return parsed
 
     try:
-        value = cache.get_or_set("universe", "sp500_changes", ttl_seconds=30 * 86400, loader=load).value
+        value = cache.get_or_set("universe", "sp500_membership", ttl_seconds=30 * 86400, loader=load).value
+        if not value:
+            # A previously-cached failure/empty parse must not pin degradation for the
+            # whole TTL — refetch now and overwrite the cached entry.
+            value = load()
+            cache.put("universe", "sp500_membership", value)
     except Exception:  # noqa: BLE001
-        return []
-    return value or []
+        _membership_retry_at = time.monotonic() + 300
+        return None
+    return value or None
 
 
-def reconstruct(current: set[str], changes: list[dict], asof) -> set[str]:
-    """Membership as of ``asof``: start from the current set and reverse every change dated
-    *after* asof (newest→oldest: drop the ticker that was added, restore the one removed)."""
-    asof_iso = asof.isoformat() if isinstance(asof, date) else str(asof)[:10]
-    members = {_norm(t) for t in current}
-    for ch in sorted(changes, key=lambda c: c["date"], reverse=True):
-        if ch["date"] <= asof_iso:
-            break
-        if ch.get("added"):
-            members.discard(ch["added"])
-        if ch.get("removed"):
-            members.add(ch["removed"])
-    return members
+def membership_available() -> bool:
+    """True when point-in-time membership reconstruction is actually possible."""
+    return _membership() is not None
 
 
 @lru_cache(maxsize=4096)
 def _members_on_iso(asof_iso: str) -> frozenset[str]:
-    return frozenset(reconstruct(set(sp500_tickers()), _changes(), asof_iso))
+    stints = _membership()
+    if stints is None:
+        # Degraded — NEVER memoize it: the next call should retry the source instead
+        # of pinning survivorship bias for the process lifetime. (lru_cache does not
+        # cache raising calls.)
+        raise LookupError("sp500 membership data unavailable")
+    return frozenset(
+        s["ticker"] for s in stints
+        if s["start"] <= asof_iso and (s["end"] is None or asof_iso <= s["end"])
+    )
 
 
 def members_on(asof) -> set[str]:
     """S&P 500 constituents as of a historical date (memoized). Falls back to the current
-    membership when the change-log is unavailable."""
+    membership when the stint data is unavailable — check ``membership_available()`` and
+    disclose that degradation to the user."""
     asof_iso = asof.isoformat() if isinstance(asof, date) else str(asof)[:10]
-    return set(_members_on_iso(asof_iso))
+    try:
+        return set(_members_on_iso(asof_iso))
+    except LookupError:
+        return set(sp500_tickers())
 
 
 def investable_superset() -> list[str]:
     """Every ticker the active engine may need to price: the current S&P 500, every name
-    ever added/removed in the change-log, and the bundled ETF universe."""
+    that was ever an index member per the stint data, and the bundled ETF universe."""
     names = {_norm(t) for t in sp500_tickers()}
-    for ch in _changes():
-        if ch.get("added"):
-            names.add(ch["added"])
-        if ch.get("removed"):
-            names.add(ch["removed"])
+    for stint in _membership() or []:
+        names.add(stint["ticker"])
     names.update(_norm(t) for t in ETF_UNIVERSE)
     return sorted(names)
