@@ -29,12 +29,20 @@ function Select({ value, onChange, options }: { value: string; onChange: (v: str
 }
 
 export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
-  seed: Model | null; cats: CatMeta[]; onSave: (payload: any, editId: number | null) => void; onCancel: () => void }) {
+  seed: Model | null; cats: CatMeta[]; onSave: (payload: any, editId: number | null) => void | Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState(seed?.name ?? "");
   const [tagline, setTagline] = useState(seed && seed.isRule ? seed.tagline : "");
   const [category, setCategory] = useState(seed?.category ?? "risk_rotation");
   const [rule, setRule] = useState<Rule>(() => (seed ? rulesFromModel(seed) : null) ?? blankRule());
+  const [saving, setSaving] = useState(false);
   const set = <K extends keyof Rule>(k: K, v: Rule[K]) => setRule((d) => ({ ...d, [k]: v }));
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try { await onSave(ruleToPayload(name, category, rule, tagline), seed?.id ?? null); }
+    finally { setSaving(false); }
+  }
 
   const cat = cats.find((c) => c.id === category) ?? cats[0];
   const sigMeta = SIGNALS.find((s) => s.id === rule.signalType)!;
@@ -151,9 +159,9 @@ export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>
-          <Btn variant="primary" icon={seed ? "edit" : "plus"} onClick={() => onSave(ruleToPayload(name, category, rule, tagline), seed?.id ?? null)} disabled={!valid} style={{ flex: 1 }}>
-            {seed ? "Save changes" : "Create & track"}</Btn>
-          <Btn variant="soft" onClick={onCancel}>Cancel</Btn>
+          <Btn variant="primary" icon={seed ? "edit" : "plus"} onClick={save} disabled={!valid || saving} style={{ flex: 1 }}>
+            {saving ? "Saving…" : seed ? "Save changes" : "Create & track"}</Btn>
+          <Btn variant="soft" onClick={onCancel} disabled={saving}>Cancel</Btn>
         </div>
         {!valid && (
           <div style={{ padding: "10px 12px", borderRadius: "var(--r-sm)", border: "1px solid var(--neg)", background: "var(--neg-soft)", color: "var(--text-1)", fontSize: 12, lineHeight: 1.45 }}>

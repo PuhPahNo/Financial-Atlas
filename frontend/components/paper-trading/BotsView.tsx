@@ -43,15 +43,16 @@ export function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }:
           </div>
           <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-1)", lineHeight: 1.2 }}>{model.name}</div>
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, opacity: hover ? 1 : 0, transform: hover ? "none" : "translateX(6px)", transition: "opacity .15s, transform .15s" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, opacity: hover ? 1 : 0, pointerEvents: hover ? "auto" : "none", transform: hover ? "none" : "translateX(6px)", transition: "opacity .15s, transform .15s" }} onClick={(e) => e.stopPropagation()}>
+          <IconBtn icon="star" size={28} title={model.favorite ? "Unfavorite" : "Favorite"} onClick={() => onToggleFav(model.id)} />
           {model.author === "You" && <IconBtn icon="edit" size={28} title="Edit parameters" onClick={() => onEdit(model)} />}
           {model.author === "You" && <IconBtn icon="trash" size={28} tone="danger" title="Archive model" onClick={() => onDelete(model)} />}
         </div>
-        <button onClick={(e) => { e.stopPropagation(); onToggleFav(model.id); }} title="Favorite"
-          style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", cursor: "pointer",
-            color: model.favorite ? "var(--cat-rotation)" : "var(--text-3)", padding: 4, opacity: hover ? 0 : model.favorite ? 1 : 0, transition: "opacity .15s" }}>
-          <Icon name="star" size={15} fill={model.favorite} />
-        </button>
+        {model.favorite && !hover && (
+          <span style={{ position: "absolute", top: 16, right: 16, color: "var(--cat-rotation)", pointerEvents: "none" }}>
+            <Icon name="star" size={15} fill />
+          </span>
+        )}
       </div>
 
       <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.45, minHeight: 36 }}>{model.tagline}</div>
@@ -59,7 +60,7 @@ export function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }:
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
         <MiniStat label="Return" value={fmt.pct(model.stats.cagr)} tone={up ? "pos" : "neg"} tip={STAT_TIPS.cagr} />
-        <MiniStat label="Sharpe" value={model.stats.sharpe.toFixed(2)} tip={STAT_TIPS.sharpe} />
+        <MiniStat label="Sharpe" value={model.stats.sharpe != null ? model.stats.sharpe.toFixed(2) : "—"} tip={STAT_TIPS.sharpe} />
         <MiniStat label="Max DD" value={model.stats.maxDD.toFixed(1) + "%"} tone="neg" tip={STAT_TIPS.maxDD} align="right" />
         <PtTip tip={metricStateTip(model)} align="right">
           <Pill tone={model.backtested ? "pos" : "accent"}>{model.backtested ? `Win ${model.stats.winRate.toFixed(0)}%` : metricStateLabel(model)}</Pill>

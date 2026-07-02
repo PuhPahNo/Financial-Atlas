@@ -14,8 +14,11 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
   const [name, setName] = useState(seed?.name ?? "");
   const [emoji, setEmoji] = useState(seed?.emoji ?? "🦈");
   const [bio, setBio] = useState(seed?.bio ?? "");
-  const [cash, setCash] = useState(seed?.starting_cash ?? 100000);
+  const [cashText, setCashText] = useState(String(seed?.starting_cash ?? 100000));
+  const [saving, setSaving] = useState(false);
   const [allocs, setAllocs] = useState<Alloc[]>(seed?.allocations.map((a) => ({ strategy_id: a.strategy_id, weight: a.weight })) ?? []);
+  // Type freely; clamp only when the field loses focus so "5" can become "50000".
+  const cash = Math.max(1000, parseInt(cashText.replace(/\D/g, "") || "0", 10) || 0);
 
   const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models]);
   const seedById = useMemo(() => new Map((seed?.allocations ?? []).map((a) => [a.strategy_id, a])), [seed]);
@@ -51,11 +54,15 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
   const setWeight = (id: number, w: number) => setAllocs((a) => a.map((x) => (x.strategy_id === id ? { ...x, weight: w } : x)));
   const remove = (id: number) => setAllocs((a) => a.filter((x) => x.strategy_id !== id));
 
-  function submit() {
-    onSave({
-      name: name.trim(), emoji, bio: bio.trim(), starting_cash: cash,
-      allocations: allocs.filter((a) => a.weight > 0).map((a) => ({ strategy_id: a.strategy_id, weight: a.weight })),
-    }, seed?.id ?? null);
+  async function submit() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        name: name.trim(), emoji, bio: bio.trim(), starting_cash: cash,
+        allocations: allocs.filter((a) => a.weight > 0).map((a) => ({ strategy_id: a.strategy_id, weight: a.weight })),
+      }, seed?.id ?? null);
+    } finally { setSaving(false); }
   }
 
   return (
@@ -87,7 +94,8 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
           <div className="m-grid-1" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Starting capital</div>
-              <TextInput mono value={cash} onChange={(v) => setCash(Math.max(1000, parseInt(v.replace(/\D/g, "") || "0", 10)))} />
+              <TextInput mono value={cashText} onChange={setCashText} onBlur={() => setCashText(String(cash))} placeholder="100000" />
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 5 }}>Minimum $1,000 · currently {fmt.usd0(cash)}</div>
             </div>
             <div>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Style (optional)</div>
@@ -166,8 +174,8 @@ export default function TraderForm({ open, seed, models, onSave, onClose }: {
         </div>
 
         <div style={{ padding: "16px 24px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <Btn variant="soft" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" icon={seed ? "edit" : "plus"} onClick={submit} disabled={!valid}>{seed ? "Save trader" : "Create trader"}</Btn>
+          <Btn variant="soft" onClick={onClose} disabled={saving}>Cancel</Btn>
+          <Btn variant="primary" icon={seed ? "edit" : "plus"} onClick={submit} disabled={!valid || saving}>{saving ? "Saving…" : seed ? "Save trader" : "Create trader"}</Btn>
         </div>
       </div>
     </Modal>

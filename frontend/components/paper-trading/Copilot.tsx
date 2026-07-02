@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { paperTradingApi } from "@/lib/paperTradingApi";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiErrorText, paperTradingApi } from "@/lib/paperTradingApi";
 import { Btn, Icon, IconBtn } from "./ptkit";
 
-interface Msg { id: number; role: string; content: string; tool_calls?: any[] }
+interface Msg { id: number; role: string; content: string; tool_calls?: any[]; error?: boolean }
 interface Pending { id: number; action: string; payload: any; status: string }
 interface ActionStatus { id: number; action: string; status: string; summary?: string; details?: string; result_ref?: any }
 
@@ -38,15 +38,21 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
   const [actions, setActions] = useState<ActionStatus[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  const connect = useCallback(() => {
+    setSessionError(null);
     paperTradingApi.createAssistantSession().then((res) => {
       setSessionId(res.data.session.id);
       setActions(res.data.actions ?? []);
-    }).catch(() => {});
+    }).catch((e) => setSessionError(apiErrorText(e)));
   }, []);
+  useEffect(() => { connect(); }, [connect]);
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" }); }, [messages, pending, busy]);
+
+  const pushError = (prefix: string, e: unknown) =>
+    setMessages((m) => [...m, { id: Date.now(), role: "assistant", error: true, content: `${prefix}: ${apiErrorText(e)}` }]);
 
   async function send(text: string) {
     if (!sessionId || !text.trim() || busy) return;
@@ -58,15 +64,19 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
       setMessages(res.data.messages);
       setPending(res.data.pending_actions ?? []);
       setActions(res.data.actions ?? []);
-    } catch { /* ignore */ } finally { setBusy(false); }
+    } catch (e) { pushError("That message didn't go through", e); } finally { setBusy(false); }
   }
   async function confirm(id: number) {
-    const res = await paperTradingApi.confirmAssistantAction(id);
-    setMessages(res.data.messages); setPending(res.data.pending_actions ?? []); setActions(res.data.actions ?? []); onChanged?.();
+    try {
+      const res = await paperTradingApi.confirmAssistantAction(id);
+      setMessages(res.data.messages); setPending(res.data.pending_actions ?? []); setActions(res.data.actions ?? []); onChanged?.();
+    } catch (e) { pushError("Couldn't apply that action", e); }
   }
   async function reject(id: number) {
-    const res = await paperTradingApi.rejectAssistantAction(id);
-    setMessages(res.data.messages); setPending(res.data.pending_actions ?? []); setActions(res.data.actions ?? []);
+    try {
+      const res = await paperTradingApi.rejectAssistantAction(id);
+      setMessages(res.data.messages); setPending(res.data.pending_actions ?? []); setActions(res.data.actions ?? []);
+    } catch (e) { pushError("Couldn't reject that action", e); }
   }
 
   return (
@@ -82,7 +92,13 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
       </div>
 
       <div ref={scroller} className="card" style={{ flex: 1, overflowY: "auto", padding: 22, display: "flex", flexDirection: "column", gap: 16, background: "var(--surface-1)" }}>
-        {messages.length === 0 && !busy && (
+        {sessionError && (
+          <div style={{ margin: "auto", textAlign: "center", maxWidth: 440 }}>
+            <div style={{ fontSize: 14, color: "var(--neg)", marginBottom: 14, lineHeight: 1.5 }}>Couldn't connect to the Copilot: {sessionError}</div>
+            <Btn variant="soft" size="sm" onClick={connect}>Retry connection</Btn>
+          </div>
+        )}
+        {!sessionError && messages.length === 0 && !busy && (
           <div style={{ margin: "auto", textAlign: "center", maxWidth: 440 }}>
             <div style={{ fontSize: 15, color: "var(--text-2)", marginBottom: 18, lineHeight: 1.5 }}>I can pull Atlas valuation & cash-flow data, turn a plain-English idea into a backtestable signal rule (with your OK), and run backtests across real market regimes. Try:</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
@@ -95,8 +111,8 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
         {messages.map((m) => (
           <div key={m.id} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
             <div style={{ maxWidth: "min(82%, 760px)", padding: "12px 16px", borderRadius: 16, fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap",
-              background: m.role === "user" ? "var(--accent)" : "var(--surface-2)", color: m.role === "user" ? "#0a0a12" : "var(--text-1)",
-              border: m.role === "user" ? "none" : "1px solid var(--border)" }}>
+              background: m.role === "user" ? "var(--accent)" : m.error ? "var(--neg-soft)" : "var(--surface-2)", color: m.role === "user" ? "#0a0a12" : "var(--text-1)",
+              border: m.role === "user" ? "none" : m.error ? "1px solid var(--neg)" : "1px solid var(--border)" }}>
               {m.content}
             </div>
           </div>
@@ -139,7 +155,7 @@ export default function Copilot({ onChanged }: { onChanged?: () => void }) {
 
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(input)}
-          placeholder={sessionId ? "Ask Atlas anything about your strategies or the markets…" : "Connecting…"} disabled={!sessionId}
+          placeholder={sessionId ? "Ask Atlas anything about your strategies or the markets…" : sessionError ? "Connection failed — retry above" : "Connecting…"} disabled={!sessionId}
           style={{ flex: 1, padding: "13px 16px", background: "var(--surface-2)", color: "var(--text-1)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontSize: 14, fontFamily: "var(--font-sans)", outline: "none" }}
           onFocus={(e) => (e.target.style.borderColor = "var(--accent-line)")} onBlur={(e) => (e.target.style.borderColor = "var(--border)")} />
         <IconBtn icon="send" size={48} onClick={() => send(input)} title="Send" />

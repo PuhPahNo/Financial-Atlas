@@ -130,12 +130,14 @@ export function Slider({ label, value, min, max, step, unit, onChange, hue = "va
   );
 }
 
-export function TextInput({ value, onChange, placeholder, mono, style }: { value: string | number; onChange: (v: string) => void; placeholder?: string; mono?: boolean; style?: CSSProperties }) {
+export function TextInput({ value, onChange, onBlur, placeholder, mono, style }: {
+  value: string | number; onChange: (v: string) => void; onBlur?: () => void; placeholder?: string; mono?: boolean; style?: CSSProperties }) {
   return (
     <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={mono ? "mono" : ""}
       style={{ width: "100%", padding: "11px 14px", background: "var(--surface-2)", color: "var(--text-1)", border: "1px solid var(--border)",
         borderRadius: "var(--r-sm)", fontSize: 14, fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)", outline: "none", ...style }}
-      onFocus={(e) => (e.target.style.borderColor = "var(--accent-line)")} onBlur={(e) => (e.target.style.borderColor = "var(--border)")} />
+      onFocus={(e) => (e.target.style.borderColor = "var(--accent-line)")}
+      onBlur={(e) => { e.target.style.borderColor = "var(--border)"; onBlur?.(); }} />
   );
 }
 

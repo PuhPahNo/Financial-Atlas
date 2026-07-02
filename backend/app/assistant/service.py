@@ -647,6 +647,10 @@ def _parse_signal_request(message: str) -> dict | None:
             exclude.append((dm.start(1), dm.end()))
         else:
             signal["pct"] = 0.05
+        # window_days is required by validation for pct signals; honor "over N days"
+        # phrasing, else use the same default as the RuleBuilder UI.
+        wm = re.search(r"(?:over|in|within)\s+(?:the\s+)?(?:last\s+|past\s+)?(\d{1,3})\s*(?:trading\s+)?days?", lo)
+        signal["window_days"] = max(1, min(252, int(wm.group(1)))) if wm else 10
     tp, sl = _extract_tp_sl(message, exclude)
     tp = tp or 0.10
     sl = sl or 0.05
