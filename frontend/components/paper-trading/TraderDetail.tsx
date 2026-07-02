@@ -123,6 +123,12 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
               <div style={{ marginTop: 10, padding: "10px 14px", background: beat ? "var(--pos-soft)" : "var(--neg-soft)", borderRadius: "var(--r-sm)", fontSize: 13, color: beat ? "var(--pos)" : "var(--neg)", fontWeight: 500 }}>
                 {beat ? `Beat a 100% S&P 500 portfolio by ${(perf.alpha * 100).toFixed(1)} pts.` : `Trailed a 100% S&P 500 portfolio by ${Math.abs(perf.alpha * 100).toFixed(1)} pts.`}
               </div>
+              {perf.basis === "resimulated" && (
+                <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start", fontSize: 11.5, color: "var(--text-3)", lineHeight: 1.5 }}>
+                  <span style={{ color: "var(--text-3)", marginTop: 1, flexShrink: 0 }}><Icon name="info" size={13} /></span>
+                  <span>{perf.basis_note || "Simulated from the current allocation — not a realized trade record."}</span>
+                </div>
+              )}
             </div>
 
             <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>

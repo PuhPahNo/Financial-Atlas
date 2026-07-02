@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { CatDot, Icon, IconBtn, Pill, PtTip, Segmented, Btn, TextInput, Empty } from "./ptkit";
 import { Sparkline } from "./ptcharts";
-import { fmt, CatMeta, Model, STAT_TIPS, metricStateLabel, metricStateTip } from "./ptdata";
+import { fmt, CAT_HUES, CatMeta, Model, STAT_TIPS, metricStateLabel, metricStateTip } from "./ptdata";
 
 function MiniStat({ label, value, tone, tip, align }: { label: string; value: string; tone?: "pos" | "neg"; tip: string; align?: "left" | "right" }) {
   return (
@@ -23,6 +23,9 @@ export function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }:
   const up = model.stats.cagr >= 0;
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onClick={() => onOpen(model)} className="card"
+      role="button" tabIndex={0} aria-label={`Open ${model.name}`}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(model); } }}
+      onFocus={() => setHover(true)} onBlur={() => setHover(false)}
       style={{ padding: 18, cursor: "pointer", position: "relative", display: "flex", flexDirection: "column", gap: 13,
         transition: "transform .18s var(--ease), border-color .18s, background .18s",
         transform: hover ? "translateY(-3px)" : "none", borderColor: hover ? "var(--border-strong)" : "var(--border)",
@@ -87,10 +90,11 @@ function CategoryHeader({ cat, count }: { cat: CatMeta; count: number }) {
   );
 }
 
-export default function BotsView({ models, cats, onOpen, onNew, onEdit, onDelete, onToggleFav }: {
-  models: Model[]; cats: CatMeta[]; onOpen: (m: Model) => void; onNew: () => void; onEdit: (m: Model) => void; onDelete: (m: Model) => void; onToggleFav: (id: number) => void }) {
+export default function BotsView({ models, cats, archived = [], onOpen, onNew, onEdit, onDelete, onRestore, onToggleFav }: {
+  models: Model[]; cats: CatMeta[]; archived?: any[]; onOpen: (m: Model) => void; onNew: () => void; onEdit: (m: Model) => void; onDelete: (m: Model) => void; onRestore?: (m: Model) => void; onToggleFav: (id: number) => void }) {
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   const filtered = useMemo(() => models.filter((m) =>
     (filter === "all" || m.category === filter) && (!q || m.name.toLowerCase().includes(q.toLowerCase()) || m.tagline.toLowerCase().includes(q.toLowerCase()))
@@ -128,6 +132,29 @@ export default function BotsView({ models, cats, onOpen, onNew, onEdit, onDelete
           );
         })}
       </div>
+
+      {archived.length > 0 && (
+        <div style={{ marginTop: 40, borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+          <button onClick={() => setShowArchived((v) => !v)} aria-expanded={showArchived}
+            style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer",
+              color: "var(--text-2)", fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600 }}>
+            <Icon name="chevronDown" size={14} style={{ transform: showArchived ? "none" : "rotate(-90deg)", transition: "transform .2s" }} />
+            Archived models ({archived.length})
+          </button>
+          {showArchived && (
+            <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+              {archived.map((s) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px",
+                  background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)" }}>
+                  <CatDot hue={CAT_HUES[s.category] || "var(--accent)"} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</span>
+                  {onRestore && <Btn variant="soft" size="sm" icon="refresh" onClick={() => onRestore({ id: s.id, name: s.name } as Model)}>Restore</Btn>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -28,6 +28,9 @@ function TraderCard({ acc, onOpen, onEdit, onDelete }: { acc: TraderAccount; onO
   const [hover, setHover] = useState(false);
   return (
     <div className="card" onClick={() => onOpen(acc)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      role="button" tabIndex={0} aria-label={`Open ${acc.name}`}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(acc); } }}
+      onFocus={() => setHover(true)} onBlur={() => setHover(false)}
       style={{ padding: 18, cursor: "pointer", display: "flex", flexDirection: "column", gap: 14, transition: "transform .18s var(--ease), border-color .18s, background .18s",
         transform: hover ? "translateY(-3px)" : "none", borderColor: hover ? "var(--border-strong)" : "var(--border)", background: hover ? "var(--surface-2)" : "var(--surface-1)" }}>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>

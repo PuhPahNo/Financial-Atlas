@@ -29,12 +29,19 @@ export function Sparkline({ series, color = "var(--pos)", height = 34, strokeWid
   );
 }
 
-export function AreaChart({ series, benchmark = null, color = "var(--accent)", height = 260, grid = true, animate = true, benchColor = "var(--text-3)", uid = "a", interactive = true, valueFmt, seriesLabel = "Strategy", benchLabel = "S&P 500" }: {
+function EmptyChart({ height, label = "Not enough data yet" }: { height: number; label?: string }) {
+  return (
+    <div style={{ height, display: "grid", placeItems: "center", color: "var(--text-3)", fontSize: 12,
+      border: "1px dashed var(--border)", borderRadius: "var(--r-sm)" }}>{label}</div>
+  );
+}
+
+export function AreaChart({ series, benchmark = null, color = "var(--accent)", height = 260, grid = true, animate = true, benchColor = "var(--text-3)", uid = "a", interactive = true, valueFmt, seriesLabel = "Strategy", benchLabel = "S&P 500", axes = true }: {
   series: Pt[]; benchmark?: Pt[] | null; color?: string; height?: number; grid?: boolean; animate?: boolean; benchColor?: string; uid?: string;
-  interactive?: boolean; valueFmt?: (v: number) => string; seriesLabel?: string; benchLabel?: string }) {
+  interactive?: boolean; valueFmt?: (v: number) => string; seriesLabel?: string; benchLabel?: string; axes?: boolean }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [hov, setHov] = useState<number | null>(null);
-  if (!series || series.length < 2) return <div style={{ height }} />;
+  if (!series || series.length < 2) return <EmptyChart height={height} label="Run a backtest to see the equity curve" />;
   const pad = 14;
   const gid = "grad-" + uid;
   const innerH = height - pad * 2;
@@ -60,8 +67,23 @@ export function AreaChart({ series, benchmark = null, color = "var(--accent)", h
   const hovLeft = hov != null ? (hov / (series.length - 1)) * 100 : 0;
   const tipRight = hovLeft > 60;
 
+  // Axis labels are HTML overlays, not SVG text: the chart uses preserveAspectRatio="none"
+  // (non-uniform scaling) which would distort any in-SVG glyphs.
+  const startDate = series[0]?.d;
+  const endDate = series[series.length - 1]?.d;
+  const axisTxt: React.CSSProperties = { position: "absolute", fontSize: 9.5, color: "var(--text-3)", fontFamily: "var(--font-mono)", pointerEvents: "none" };
+
   return (
-    <div ref={wrap} style={{ position: "relative", height }} onMouseMove={onMove} onMouseLeave={() => setHov(null)}>
+    <div ref={wrap} style={{ position: "relative", height }} onMouseMove={onMove} onMouseLeave={() => setHov(null)}
+      role="img" aria-label={`${seriesLabel} equity curve${startDate ? ` from ${startDate} to ${endDate}` : ""}, ranging ${fmtV(min)} to ${fmtV(max)}`}>
+      {axes && (
+        <>
+          <span style={{ ...axisTxt, left: 2, top: 2 }}>{fmtV(max)}</span>
+          <span style={{ ...axisTxt, left: 2, bottom: 14 }}>{fmtV(min)}</span>
+          {startDate && <span style={{ ...axisTxt, left: 2, bottom: 1 }}>{startDate}</span>}
+          {endDate && <span style={{ ...axisTxt, right: 2, bottom: 1 }}>{endDate}</span>}
+        </>
+      )}
       <svg viewBox={`0 0 ${VB} ${height}`} preserveAspectRatio="none" style={{ width: "100%", height, display: "block" }}>
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -131,11 +153,11 @@ export function Donut({ data, size = 132, thickness = 16 }: { data: { ticker: st
 export const DONUT_PALETTE = PALETTE;
 
 export function ReturnBars({ series, height = 70, bars = 18 }: { series: Pt[]; height?: number; bars?: number }) {
-  if (!series || series.length < 2) return <div style={{ height }} />;
+  if (!series || series.length < 2) return <EmptyChart height={height} label="No period returns yet" />;
   const step = Math.max(1, Math.floor(series.length / bars));
   const rets: number[] = [];
   for (let i = step; i < series.length; i += step) rets.push(series[i].v / series[i - step].v - 1);
-  if (!rets.length) return <div style={{ height }} />;
+  if (!rets.length) return <EmptyChart height={height} label="No period returns yet" />;
   const maxAbs = Math.max(...rets.map((r) => Math.abs(r)), 0.001);
   const bw = VB / rets.length;
   const mid = height / 2;

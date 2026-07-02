@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, ReactNode, useEffect, useState } from "react";
+import { CSSProperties, ReactNode, useEffect, useRef, useState } from "react";
 
 // ---- Icons (stroke geometry, ported from the design) ---------------------
 const PATHS: Record<string, string> = {
@@ -29,6 +29,7 @@ const PATHS: Record<string, string> = {
   target: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h.01",
   shield: "M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6l8-3z",
   trend: "M3 17l6-6 4 4 8-8M21 7h-5M21 7v5",
+  refresh: "M4 9a8 8 0 0 1 13.7-3.3L20 8M20 4v4h-4M20 15a8 8 0 0 1-13.7 3.3L4 16M4 20v-4h4",
 };
 
 export function Icon({ name, size = 16, sw = 1.8, style, fill = false }: { name: string; size?: number; sw?: number; style?: CSSProperties; fill?: boolean }) {
@@ -153,11 +154,26 @@ function Backdrop({ onClose, children, align = "flex-end" }: { onClose: () => vo
   );
 }
 
+function useDialogFocus() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    ref.current?.focus();
+    return () => prev?.focus?.();  // restore focus to the trigger on close
+  }, []);
+  return ref;
+}
+
 export function SlideOver({ open, onClose, children, width = 480 }: { open: boolean; onClose: () => void; children: ReactNode; width?: number }) {
   if (!open) return null;
+  return <SlideOverInner onClose={onClose} width={width}>{children}</SlideOverInner>;
+}
+function SlideOverInner({ onClose, children, width }: { onClose: () => void; children: ReactNode; width: number }) {
+  const ref = useDialogFocus();
   return (
     <Backdrop onClose={onClose} align="flex-end">
-      <div onClick={(e) => e.stopPropagation()} style={{ width: `min(${width}px, 96vw)`, height: "100%", background: "var(--surface-1)",
+      <div ref={ref} role="dialog" aria-modal="true" tabIndex={-1} onClick={(e) => e.stopPropagation()}
+        style={{ width: `min(${width}px, 96vw)`, height: "100%", background: "var(--surface-1)", outline: "none",
         borderLeft: "1px solid var(--border-strong)", boxShadow: "var(--shadow-pop)", overflowY: "auto", animation: "pt-slideIn .3s var(--ease)" }}>{children}</div>
     </Backdrop>
   );
@@ -165,9 +181,14 @@ export function SlideOver({ open, onClose, children, width = 480 }: { open: bool
 
 export function Modal({ open, onClose, children, width = 460 }: { open: boolean; onClose: () => void; children: ReactNode; width?: number }) {
   if (!open) return null;
+  return <ModalInner onClose={onClose} width={width}>{children}</ModalInner>;
+}
+function ModalInner({ onClose, children, width }: { onClose: () => void; children: ReactNode; width: number }) {
+  const ref = useDialogFocus();
   return (
     <Backdrop onClose={onClose} align="center">
-      <div onClick={(e) => e.stopPropagation()} style={{ alignSelf: "center", width: `min(${width}px, 94vw)`, background: "var(--surface-1)",
+      <div ref={ref} role="dialog" aria-modal="true" tabIndex={-1} onClick={(e) => e.stopPropagation()}
+        style={{ alignSelf: "center", width: `min(${width}px, 94vw)`, background: "var(--surface-1)", outline: "none",
         border: "1px solid var(--border-strong)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-pop)", animation: "pt-fadeUp .25s var(--ease)" }}>{children}</div>
     </Backdrop>
   );

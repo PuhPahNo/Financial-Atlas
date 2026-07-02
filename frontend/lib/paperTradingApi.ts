@@ -160,7 +160,8 @@ export interface AccountAttribution {
   reconciliation: { contribution_final: number; cash_dollars: number; current_value: number; difference: number };
 }
 export interface AccountPerformance {
-  account_id: number; window: { start: string; end: string }; starting_cash: number; cash_dollars: number;
+  account_id: number; window: { start: string; end: string }; basis?: string; basis_note?: string;
+  starting_cash: number; cash_dollars: number;
   current_value: number; total_return: number; benchmark_return: number; alpha: number; max_drawdown: number;
   equity: { date: string; equity: number; benchmark_equity: number }[];
   drawdown_curve?: { date: string; drawdown: number }[];
@@ -196,7 +197,11 @@ export const paperTradingApi = {
   cloneStrategy: (id: number) =>
     request<{ strategy: Strategy }>(`/paper-trading/strategies/${id}/clone`, { method: "POST" }),
   deleteStrategy: (id: number) =>
-    request<{ deleted: number }>(`/paper-trading/strategies/${id}`, { method: "DELETE" }),
+    request<{ archived: number; in_use_by: string[] }>(`/paper-trading/strategies/${id}`, { method: "DELETE" }),
+  listArchivedStrategies: () =>
+    request<{ strategies: Strategy[] }>("/paper-trading/strategies-archived"),
+  unarchiveStrategy: (id: number) =>
+    request<{ strategy: Strategy }>(`/paper-trading/strategies/${id}/unarchive`, { method: "POST", body: body({}) }),
   runBacktest: (payload: unknown) =>
     request<{ run: BacktestRun; holdings: any[] }>("/backtests", { method: "POST", body: body(payload) }),
   queueBacktest: (payload: Record<string, unknown>) =>

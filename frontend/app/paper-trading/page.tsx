@@ -38,17 +38,23 @@ export default function PaperTradingPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [accounts, setAccounts] = useState<TraderAccount[]>([]);
+  const [archived, setArchived] = useState<any[]>([]);
   const [traderDetail, setTraderDetail] = useState<TraderAccount | null>(null);
   const [traderForm, setTraderForm] = useState<{ open: boolean; seed: TraderAccount | null }>({ open: false, seed: null });
   const [traderDel, setTraderDel] = useState<TraderAccount | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [catRes, accRes] = await Promise.all([paperTradingApi.categories(), paperTradingApi.listAccounts()]);
+      const [catRes, accRes, archRes] = await Promise.all([
+        paperTradingApi.categories(),
+        paperTradingApi.listAccounts(),
+        paperTradingApi.listArchivedStrategies().catch(() => ({ data: { strategies: [] } })),
+      ]);
       const cs = catRes.data.categories || [];
       setCats(cs.map(catMeta));
       setStrategies(cs.flatMap((c: any) => c.strategies || []));
       setAccounts(accRes.data.accounts || []);
+      setArchived(archRes.data.strategies || []);
       setLoadError(null);
     } catch (e) {
       // Don't masquerade a dead backend as an empty catalog.
@@ -132,8 +138,19 @@ export default function PaperTradingPage() {
   }
   async function remove(m: Model) {
     setDelTarget(null); setDetail(null);
-    try { await paperTradingApi.deleteStrategy(m.id); await refresh(); flash(`Archived “${m.name}”`); }
+    try {
+      const res = await paperTradingApi.deleteStrategy(m.id);
+      await refresh();
+      const inUse = res.data?.in_use_by ?? [];
+      flash(inUse.length
+        ? `Archived “${m.name}” — still simulating in ${inUse.join(", ")} until de-allocated`
+        : `Archived “${m.name}”`);
+    }
     catch (e: any) { flash(apiErrorText(e) || "Could not archive", "err"); }
+  }
+  async function restore(m: Model) {
+    try { await paperTradingApi.unarchiveStrategy(m.id); await refresh(); flash(`Restored “${m.name}”`); }
+    catch (e: any) { flash(apiErrorText(e) || "Could not restore", "err"); }
   }
   const onToggleFav = (id: number) => setFavorites(toggleFavorite(id));
 
@@ -224,7 +241,7 @@ export default function PaperTradingPage() {
               </div>
             ) : (
               <>
-                {view === "bots" && <BotsView models={models} cats={cats} onOpen={setDetail} onNew={() => openBuilder(null)} onEdit={openBuilder} onDelete={setDelTarget} onToggleFav={onToggleFav} />}
+                {view === "bots" && <BotsView models={models} cats={cats} archived={archived} onOpen={setDetail} onNew={() => openBuilder(null)} onEdit={openBuilder} onDelete={setDelTarget} onRestore={restore} onToggleFav={onToggleFav} />}
                 {view === "builder" && <Builder key={editing?.id ?? "new"} seed={editing} cats={cats} onSave={save} onCancel={() => setView("bots")} />}
                 {view === "backtest" && <BacktestLab key={String(bt.id) + bt.regime} models={models} preselectId={bt.id} initialRegime={bt.regime} />}
                 {view === "traders" && <TradersView accounts={accounts} onOpen={setTraderDetail} onNew={() => setTraderForm({ open: true, seed: null })} onEdit={(a) => setTraderForm({ open: true, seed: a })} onDelete={setTraderDel} />}
