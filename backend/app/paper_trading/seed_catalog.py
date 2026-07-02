@@ -1,10 +1,22 @@
-"""Seeded paper-trading categories and starter strategies."""
+"""Seeded paper-trading categories and starter strategies.
+
+Truth-pass invariants (see .scratch/paper-trading-audit/AUDIT.md R1/R2):
+- Every parameter listed here is actually read by the engine for that
+  category/model. No decorative knobs the backtester ignores.
+- No pre-claimed performance numbers: ``metrics`` ships empty, and the
+  nightly headline refresh fills real backtested figures.
+- Descriptions/methodology state what the engine actually executes. Where a
+  theme can't be modeled on daily closes (options premium, channel breakouts),
+  the text says so instead of implying math that doesn't run.
+"""
 from __future__ import annotations
 
 COMMON_CAVEATS = [
     "Research simulation only; not financial advice.",
     "Uses end-of-day data, so fills are approximate.",
 ]
+
+_NO_SEEDED_METRICS = "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."
 
 CATEGORIES = [
     {"id": "long_term", "label": "Long Term", "description": "Multi-year compounding and valuation discipline."},
@@ -19,56 +31,72 @@ SEED_STRATEGIES = [
     {
         "category": "long_term",
         "name": "FCF Compounder",
-        "description": "Buys durable free-cash-flow generators with valuation support.",
+        "description": "A fixed basket of durable free-cash-flow generators, gated on FCF quality and leverage.",
         "history": "Inspired by quality and owner-earnings screens used by long-horizon analysts.",
-        "methodology": "Rank companies by FCF margin, FCF conversion, net debt, and margin of safety.",
-        "parameters": {"tickers": ["AAPL", "MSFT", "GOOGL"], "lookback_days": 252, "max_positions": 8},
-        "metrics": {"backtested_return": 0.118, "win_rate": 0.57, "max_drawdown": -0.22},
+        "methodology": "Within the declared basket, a name is held while its originally-filed free cash flow is "
+                       "positive, FCF margin is at least 5%, and net-debt-to-FCF stays under the cap; ranked by "
+                       "point-in-time FCF yield.",
+        "parameters": {"tickers": ["AAPL", "MSFT", "GOOGL"], "universe": "tickers", "max_debt_to_fcf": 6,
+                       "max_positions": 3, "take_profit_pct": 0.50, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
     },
     {
         "category": "long_term",
         "name": "Margin of Safety Basket",
-        "description": "Favors stocks trading below Atlas blended fair value.",
-        "history": "Based on value-investing discipline around range-of-value estimates.",
-        "methodology": "Buy when margin of safety clears a threshold and fundamentals are not deteriorating.",
-        "parameters": {"tickers": ["BRK-B", "JPM", "HD"], "min_margin_of_safety": 0.2, "max_positions": 10},
-        "metrics": {"backtested_return": 0.096, "win_rate": 0.54, "max_drawdown": -0.25},
+        "description": "A leverage-strict free-cash-flow basket of large, defensible franchises.",
+        "history": "Based on value-investing discipline around downside protection.",
+        "methodology": "The same point-in-time FCF-quality gate as the compounder screen but with a tighter "
+                       "net-debt-to-FCF ceiling, so only the least-levered names qualify; ranked by FCF yield.",
+        "parameters": {"tickers": ["BRK-B", "JPM", "HD"], "universe": "tickers", "max_debt_to_fcf": 3,
+                       "max_positions": 3, "take_profit_pct": 0.50, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
     },
     {
         "category": "long_term",
         "name": "Owner Earnings Quality",
-        "description": "Looks for owner-earnings resilience and low leverage.",
+        "description": "Low-leverage compounders held on free-cash-flow durability.",
         "history": "Uses the Atlas owner-earnings vocabulary from valuation research.",
-        "methodology": "Blend owner earnings, capex intensity, and revenue consistency.",
-        "parameters": {"tickers": ["COST", "V", "MA"], "lookback_days": 504, "max_debt_to_fcf": 4},
-        "metrics": {"backtested_return": 0.105, "win_rate": 0.56, "max_drawdown": -0.2},
+        "methodology": "Point-in-time FCF-quality gate (positive free cash flow, FCF margin ≥ 5%) with a moderate "
+                       "net-debt-to-FCF cap; ranked by FCF yield.",
+        "parameters": {"tickers": ["COST", "V", "MA"], "universe": "tickers", "max_debt_to_fcf": 4,
+                       "max_positions": 3, "take_profit_pct": 0.50, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
     },
     {
         "category": "short_term",
         "name": "Dual Momentum",
-        "description": "Trades price strength confirmed by benchmark-relative momentum.",
-        "history": "Classic relative-strength approach adapted to Atlas price providers.",
-        "methodology": "Buy when short moving average and relative strength both improve.",
-        "parameters": {"tickers": ["NVDA", "AMD", "AVGO"], "fast_days": 20, "slow_days": 80},
-        "metrics": {"backtested_return": 0.142, "win_rate": 0.51, "max_drawdown": -0.3},
+        "description": "Rides the strongest names in a growth basket while they trend above their medium-term average.",
+        "history": "Relative-strength trend following adapted to Atlas price providers.",
+        "methodology": "A name is held while its close is above its ~80-day moving average and its 12-month momentum "
+                       "is positive; ranked by momentum. (Distinct from the GEM asset-class model in Risk Rotation.)",
+        "parameters": {"tickers": ["NVDA", "AMD", "AVGO"], "universe": "tickers", "slow_days": 80,
+                       "max_positions": 3, "take_profit_pct": 0.30, "stop_loss_pct": 0.15, "max_hold_days": 90},
+        "metrics": {},
     },
     {
         "category": "short_term",
         "name": "Volatility Breakout",
-        "description": "Looks for range expansion after low-volatility consolidation.",
-        "history": "Pattern follows common breakout systems but uses daily bars only.",
-        "methodology": "Enter when close exceeds recent channel after volatility compression.",
-        "parameters": {"tickers": ["SPY", "QQQ", "IWM"], "universe": "tickers", "channel_days": 55, "risk_pct": 0.01},
-        "metrics": {"backtested_return": 0.082, "win_rate": 0.44, "max_drawdown": -0.18},
+        "description": "Holds broad ETFs while they trend above their medium-term average with positive momentum.",
+        "history": "A daily-bar trend filter — true intraday range-expansion breakouts can't be modeled on "
+                   "end-of-day data.",
+        "methodology": "Approximated with a trend gate: hold while the close is above its ~55-day moving average and "
+                       "12-month momentum is positive. Channel/volatility-compression breakout logic is not modeled "
+                       "on daily closes.",
+        "parameters": {"tickers": ["SPY", "QQQ", "IWM"], "universe": "tickers", "slow_days": 55,
+                       "max_positions": 3, "take_profit_pct": 0.20, "stop_loss_pct": 0.10, "max_hold_days": 60},
+        "metrics": {},
     },
     {
         "category": "short_term",
         "name": "Mean Reversion Guardrail",
-        "description": "Buys broad ETFs after short-term oversold moves with stop controls.",
-        "history": "Short-horizon reversal model with strict risk limits.",
-        "methodology": "Enter when drawdown and RSI proxy show oversold conditions.",
-        "parameters": {"tickers": ["SPY", "DIA", "QQQ"], "universe": "tickers", "drop_threshold": -0.04, "hold_days": 5},
-        "metrics": {"backtested_return": 0.071, "win_rate": 0.58, "max_drawdown": -0.16},
+        "description": "Buys deep short-term oversold dips in broad ETFs that remain in long-term uptrends.",
+        "history": "A Larry Connors-style RSI(2) reversal with strict risk bands.",
+        "methodology": "Eligible when the 2-day RSI falls to 10 or below while price holds above its 200-day "
+                       "average; exits when the oversold reading clears (criteria exit) or on tight profit/stop bands.",
+        "parameters": {"tickers": ["SPY", "DIA", "QQQ"], "universe": "tickers", "model": "rsi_reversion",
+                       "rsi_days": 2, "max_rsi": 10, "max_positions": 3,
+                       "take_profit_pct": 0.05, "stop_loss_pct": 0.05, "max_hold_days": 10},
+        "metrics": {},
     },
     {
         "category": "short_term",
@@ -87,70 +115,89 @@ SEED_STRATEGIES = [
                 "max_hold_days": 60,
             },
         },
-        "metrics": {"backtested_return": 0.093, "win_rate": 0.49, "max_drawdown": -0.19},
+        "metrics": {},
     },
     {
         "category": "short_selling",
         "name": "Weak FCF Short",
-        "description": "Shorts companies with weak price action and deteriorating FCF.",
-        "history": "Pairs technical weakness with cash-flow quality concerns.",
-        "methodology": "Signal only when price trend and cash-flow trend both deteriorate.",
-        "parameters": {"tickers": ["BBBY", "GME", "AMC"], "max_short_exposure": 0.25, "stop_loss": 0.12},
-        "metrics": {"backtested_return": 0.064, "win_rate": 0.48, "max_drawdown": -0.21},
+        "description": "Shorts weak-trending, high-controversy names with a hard stop.",
+        "history": "Pairs technical weakness with a capped-risk exit.",
+        "methodology": "Within the declared basket, shorts a name while its close is below its ~100-day average and "
+                       "its 12-month momentum is negative; covers on the stop, a profitable decline, or max-hold.",
+        "parameters": {"tickers": ["GME", "AMC", "CVNA"], "universe": "tickers", "slow_days": 100,
+                       "stop_loss_pct": 0.12, "take_profit_pct": 0.25, "max_positions": 3, "max_hold_days": 60},
+        "metrics": {},
     },
     {
         "category": "short_selling",
         "name": "Balance Sheet Stress",
-        "description": "Screens for leverage pressure and negative momentum.",
-        "history": "Built for crisis-period stress tests such as 2008-style drawdowns.",
-        "methodology": "Rank by net debt, FCF deficit, and declining moving averages.",
-        "parameters": {"tickers": ["F", "GM", "AAL"], "max_short_exposure": 0.2, "rebalance_days": 20},
-        "metrics": {"backtested_return": 0.052, "win_rate": 0.47, "max_drawdown": -0.24},
+        "description": "Shorts cyclicals with negative price trend, sized for crisis-window stress tests.",
+        "history": "Built to probe drawdown behavior in 2008-style regimes.",
+        "methodology": "Shorts a basket name while its close is below its ~100-day average with negative momentum; "
+                       "covers on the stop, a profitable decline, or max-hold.",
+        "parameters": {"tickers": ["F", "GM", "AAL"], "universe": "tickers", "slow_days": 100,
+                       "stop_loss_pct": 0.12, "take_profit_pct": 0.25, "max_positions": 3, "max_hold_days": 60},
+        "metrics": {},
     },
     {
         "category": "short_selling",
         "name": "Failed Breakout Short",
-        "description": "Shorts failed upside breakouts with capped risk.",
-        "history": "Technical model that assumes failed strength often unwinds quickly.",
-        "methodology": "Enter short after a channel breakout reverses below the prior range.",
-        "parameters": {"tickers": ["TSLA", "COIN", "RIVN"], "channel_days": 40, "stop_loss": 0.08},
-        "metrics": {"backtested_return": 0.058, "win_rate": 0.49, "max_drawdown": -0.19},
+        "description": "Shorts high-beta names once their trend rolls over, with a tight stop.",
+        "history": "Assumes failed strength in speculative names often unwinds quickly.",
+        "methodology": "Shorts a basket name while its close is below its ~100-day average with negative momentum "
+                       "and a tight stop. (Intraday breakout-failure detection is not modeled on daily closes.)",
+        "parameters": {"tickers": ["TSLA", "COIN", "RIVN"], "universe": "tickers", "slow_days": 100,
+                       "stop_loss_pct": 0.08, "take_profit_pct": 0.20, "max_positions": 3, "max_hold_days": 45},
+        "metrics": {},
     },
     {
         "category": "options",
         "name": "Synthetic Covered Call",
-        "description": "Models covered-call behavior using underlying price and capped upside assumptions.",
-        "history": "Options-themed income model until historical options chains are available.",
-        "methodology": "Hold underlying exposure, cap upside monthly, and model synthetic premium.",
-        "parameters": {"tickers": ["AAPL", "MSFT"], "universe": "tickers", "monthly_premium_pct": 0.015, "upside_cap_pct": 0.04},
-        "metrics": {"backtested_return": 0.088, "win_rate": 0.6, "max_drawdown": -0.19},
+        "description": "Holds the underlying while it trends above its long-term average — an equity proxy for a "
+                       "covered-call sleeve.",
+        "history": "Options-themed placeholder until historical options chains are available.",
+        "methodology": "Holds each declared underlying while its close is above its 200-day average, long only. "
+                       "Option premium income and the capped upside of an actual covered call are NOT modeled — "
+                       "this is the underlying's trend exposure only.",
+        "parameters": {"tickers": ["AAPL", "MSFT"], "universe": "tickers", "max_positions": 2,
+                       "take_profit_pct": 0.25, "stop_loss_pct": 0.12, "max_hold_days": 120},
+        "metrics": {},
     },
     {
         "category": "options",
         "name": "Protective Put Proxy",
-        "description": "Uses underlying prices to model downside insurance costs and floors.",
-        "history": "Synthetic hedge model for scenario analysis without options-chain data.",
-        "methodology": "Deduct monthly hedge cost and cap drawdowns after floor threshold.",
-        "parameters": {"tickers": ["SPY"], "universe": "tickers", "hedge_cost_pct": 0.01, "floor_drawdown_pct": -0.08},
-        "metrics": {"backtested_return": 0.061, "win_rate": 0.55, "max_drawdown": -0.13},
+        "description": "Holds the underlying while it trends above its long-term average — an equity proxy for a "
+                       "hedged sleeve.",
+        "history": "Synthetic hedge placeholder for scenario analysis without options-chain data.",
+        "methodology": "Holds the underlying while its close is above its 200-day average, long only. Put premium "
+                       "cost and the drawdown floor of an actual protective put are NOT modeled.",
+        "parameters": {"tickers": ["SPY"], "universe": "tickers", "max_positions": 1,
+                       "take_profit_pct": 0.25, "stop_loss_pct": 0.12, "max_hold_days": 120},
+        "metrics": {},
     },
     {
         "category": "options",
         "name": "Volatility Premium Proxy",
-        "description": "Simulates short-volatility income with drawdown throttles.",
-        "history": "Proxy model for volatility-premium research on broad ETFs.",
-        "methodology": "Earn synthetic premium during calm periods and reduce exposure in drawdowns.",
-        "parameters": {"tickers": ["SPY", "QQQ"], "universe": "tickers", "premium_pct": 0.012, "risk_off_drawdown": -0.06},
-        "metrics": {"backtested_return": 0.074, "win_rate": 0.62, "max_drawdown": -0.2},
+        "description": "Holds broad ETFs while they trend above their long-term average — an equity proxy for a "
+                       "short-volatility sleeve.",
+        "history": "Placeholder for volatility-premium research on broad ETFs.",
+        "methodology": "Holds each ETF while its close is above its 200-day average, long only. Synthetic option "
+                       "premium and volatility-regime throttles are NOT modeled.",
+        "parameters": {"tickers": ["SPY", "QQQ"], "universe": "tickers", "max_positions": 2,
+                       "take_profit_pct": 0.25, "stop_loss_pct": 0.12, "max_hold_days": 120},
+        "metrics": {},
     },
     {
         "category": "income_quality",
         "name": "Dividend Coverage",
         "description": "Favors dividends covered by free cash flow.",
         "history": "Income model that avoids yield traps using Atlas FCF analysis.",
-        "methodology": "Rank by dividend yield, FCF coverage, net debt, and payout durability.",
-        "parameters": {"tickers": ["JNJ", "PG", "KO"], "min_yield": 0.02, "min_fcf_coverage": 1.5},
-        "metrics": {"backtested_return": 0.079, "win_rate": 0.55, "max_drawdown": -0.18},
+        "methodology": "Within the basket, a name qualifies when its point-in-time dividend yield clears the floor "
+                       "and free cash flow covers the payout by the required multiple; ranked by yield.",
+        "parameters": {"tickers": ["JNJ", "PG", "KO"], "universe": "tickers", "min_yield": 0.02,
+                       "min_fcf_coverage": 1.5, "max_positions": 3,
+                       "take_profit_pct": 0.40, "stop_loss_pct": 0.18, "max_hold_days": 365},
+        "metrics": {},
     },
     {
         "category": "income_quality",
@@ -162,34 +209,41 @@ SEED_STRATEGIES = [
                        "under the volatility ceiling, equal-weight.",
         "parameters": {"tickers": ["PEP", "WMT", "MCD"], "model": "low_volatility", "max_volatility": 0.25,
                        "max_positions": 15, "take_profit_pct": 0.40, "stop_loss_pct": 0.15, "max_hold_days": 365},
-        "metrics": {"backtested_return": 0.083, "win_rate": 0.57, "max_drawdown": -0.17},
+        "metrics": {},
     },
     {
         "category": "income_quality",
         "name": "Capital Returns",
-        "description": "Looks for shareholder yield backed by free cash flow.",
-        "history": "Tracks companies returning capital through dividends and buybacks.",
-        "methodology": "Blend dividends, repurchases, FCF margin, and debt capacity.",
-        "parameters": {"tickers": ["XOM", "CVX", "AAPL"], "min_yield": 0.015, "min_fcf_coverage": 2.0},
-        "metrics": {"backtested_return": 0.091, "win_rate": 0.53, "max_drawdown": -0.23},
+        "description": "Favors covered dividend yield backed by strong free cash flow.",
+        "history": "Tracks companies returning capital while comfortably covering the payout.",
+        "methodology": "Within the basket, a name qualifies when its point-in-time dividend yield clears the floor "
+                       "and free cash flow covers the payout by the (higher) required multiple; ranked by yield.",
+        "parameters": {"tickers": ["XOM", "CVX", "AAPL"], "universe": "tickers", "min_yield": 0.015,
+                       "min_fcf_coverage": 2.0, "max_positions": 3,
+                       "take_profit_pct": 0.40, "stop_loss_pct": 0.18, "max_hold_days": 365},
+        "metrics": {},
     },
     {
         "category": "risk_rotation",
         "name": "ETF Relative Strength",
-        "description": "Rotates among ETFs and cash based on relative strength.",
-        "history": "Simple tactical allocation model for regime shifts.",
-        "methodology": "Hold top-ranked ETF when above trend; otherwise move to cash.",
-        "parameters": {"tickers": ["SPY", "QQQ", "TLT", "GLD"], "universe": "tickers", "lookback_days": 126, "cash_symbol": "CASH"},
-        "metrics": {"backtested_return": 0.084, "win_rate": 0.52, "max_drawdown": -0.15},
+        "description": "Rotates into the strongest ETF while it's trending, else falls back to cash.",
+        "history": "A simple tactical allocation model for regime shifts.",
+        "methodology": "Each day, ranks the basket by trailing momentum and holds the single strongest ETF while it "
+                       "is above its 200-day average with positive momentum; when none qualifies, it sits in cash.",
+        "parameters": {"tickers": ["SPY", "QQQ", "TLT", "GLD"], "universe": "tickers", "lookback_days": 126,
+                       "max_positions": 1, "take_profit_pct": 0.99, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
     },
     {
         "category": "risk_rotation",
         "name": "Drawdown Brake",
-        "description": "Cuts exposure when portfolio drawdown breaches a threshold.",
-        "history": "Risk-first overlay for equity strategies.",
-        "methodology": "Scale down after drawdown, restore after trend recovery.",
-        "parameters": {"tickers": ["SPY"], "universe": "tickers", "drawdown_limit": -0.1, "reentry_days": 20},
-        "metrics": {"backtested_return": 0.068, "win_rate": 0.54, "max_drawdown": -0.12},
+        "description": "Holds equities only while they trend, stepping to cash when the trend breaks.",
+        "history": "A risk-first overlay for equity exposure.",
+        "methodology": "Holds SPY while its close is above its 200-day average with positive momentum; otherwise "
+                       "rotates to cash. The trend break is the brake.",
+        "parameters": {"tickers": ["SPY"], "universe": "tickers", "lookback_days": 126,
+                       "max_positions": 1, "take_profit_pct": 0.99, "stop_loss_pct": 0.10, "max_hold_days": 365},
+        "metrics": {},
     },
     {
         "category": "risk_rotation",
@@ -213,16 +267,18 @@ SEED_STRATEGIES = [
             "Inverse/leveraged ETFs decay over time — short holding periods only.",
             "SQQQ began trading in 2010, so pre-2010 windows have no fills.",
         ],
-        "metrics": {"backtested_return": 0.041, "win_rate": 0.43, "max_drawdown": -0.28},
+        "metrics": {},
     },
     {
         "category": "risk_rotation",
         "name": "Crisis Rotation",
-        "description": "Tests equity-to-defensive rotation during stress windows.",
-        "history": "Designed for periods like 2006-2009 where drawdown control matters.",
-        "methodology": "Rotate from equities to defensive assets when trend and volatility deteriorate.",
-        "parameters": {"tickers": ["SPY", "TLT", "GLD"], "universe": "tickers", "slow_days": 200, "volatility_limit": 0.28},
-        "metrics": {"backtested_return": 0.073, "win_rate": 0.5, "max_drawdown": -0.14},
+        "description": "Rotates into whichever of stocks, bonds, or gold is trending, else cash.",
+        "history": "Designed for stress windows like 2006-2009 where drawdown control matters.",
+        "methodology": "Each day, ranks SPY, TLT and GLD by trailing momentum and holds the single strongest while "
+                       "it is above its 200-day average with positive momentum; when none qualifies, it sits in cash.",
+        "parameters": {"tickers": ["SPY", "TLT", "GLD"], "universe": "tickers", "lookback_days": 126,
+                       "max_positions": 1, "take_profit_pct": 0.99, "stop_loss_pct": 0.20, "max_hold_days": 365},
+        "metrics": {},
     },
     # ------------------------------------------------------------------ #
     # Mainstream academic / practitioner models (PRD model-lab).          #
@@ -243,7 +299,7 @@ SEED_STRATEGIES = [
         "parameters": {"tickers": [], "model": "f_score", "min_f_score": 7, "max_positions": 12,
                        "take_profit_pct": 0.50, "stop_loss_pct": 0.20, "max_hold_days": 365},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "long_term",
@@ -257,7 +313,7 @@ SEED_STRATEGIES = [
         "parameters": {"tickers": [], "model": "magic_formula", "min_earnings_yield": 0.04, "min_roc": 0.10,
                        "max_positions": 20, "take_profit_pct": 0.60, "stop_loss_pct": 0.25, "max_hold_days": 365},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "long_term",
@@ -270,7 +326,7 @@ SEED_STRATEGIES = [
         "parameters": {"tickers": [], "model": "value_composite", "max_positions": 15,
                        "take_profit_pct": 0.50, "stop_loss_pct": 0.20, "max_hold_days": 365},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "short_term",
@@ -283,7 +339,7 @@ SEED_STRATEGIES = [
         "parameters": {"tickers": [], "model": "momentum_12_1", "max_positions": 10,
                        "take_profit_pct": 0.30, "stop_loss_pct": 0.15, "max_hold_days": 90},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "short_term",
@@ -296,7 +352,7 @@ SEED_STRATEGIES = [
         "parameters": {"tickers": [], "model": "high_52w", "min_proximity": 0.95, "max_positions": 10,
                        "take_profit_pct": 0.25, "stop_loss_pct": 0.12, "max_hold_days": 120},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "short_term",
@@ -310,7 +366,7 @@ SEED_STRATEGIES = [
                        "rsi_days": 2, "max_rsi": 10, "max_positions": 4,
                        "take_profit_pct": 0.05, "stop_loss_pct": 0.05, "max_hold_days": 10},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "income_quality",
@@ -323,7 +379,7 @@ SEED_STRATEGIES = [
         "parameters": {"tickers": [], "model": "dividend_yield", "min_yield": 0.03, "min_fcf_coverage": 1.0,
                        "max_positions": 10, "take_profit_pct": 0.40, "stop_loss_pct": 0.18, "max_hold_days": 365},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "risk_rotation",
@@ -336,7 +392,7 @@ SEED_STRATEGIES = [
         "parameters": {"tickers": ["SPY", "EFA", "AGG"], "universe": "tickers", "model": "dual_momentum",
                        "lookback_days": 252, "take_profit_pct": 0.99, "stop_loss_pct": 0.15, "max_hold_days": 365},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
     {
         "category": "risk_rotation",
@@ -351,7 +407,7 @@ SEED_STRATEGIES = [
                        "model": "trend_following", "sma_days": 210, "max_positions": 5,
                        "take_profit_pct": 0.99, "stop_loss_pct": 0.20, "max_hold_days": 365},
         "metrics": {},
-        "caveats": [*COMMON_CAVEATS, "Run a backtest to populate metrics — this catalogue ships no pre-claimed numbers."],
+        "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
 ]
 
