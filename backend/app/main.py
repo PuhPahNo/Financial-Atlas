@@ -49,6 +49,36 @@ async def _live_mark_loop() -> None:
             log.warning("live-mark tick error: %s", exc)
 
 
+async def _backtest_worker_loop() -> None:
+    """Single in-process worker for queued backtests (POST /backtests queue=true).
+
+    One job at a time — the engine lock serializes heavy scans anyway, and a lone
+    worker keeps the 512MB instance safe. Same resilience contract as the other
+    loops: nothing here can kill it, and a restart marks interrupted jobs failed
+    instead of leaving them 'running' forever."""
+    worker_log = logging.getLogger("app.backtest_worker")
+    from .paper_trading import service as pt_service
+    try:
+        stale = await asyncio.to_thread(pt_service.fail_interrupted_backtests)
+        if stale:
+            worker_log.warning("marked %d interrupted backtest job(s) failed on boot", stale)
+    except Exception as exc:  # noqa: BLE001
+        worker_log.warning("boot sweep error: %s", exc)
+    while True:
+        try:
+            run_id = await asyncio.to_thread(pt_service.claim_next_queued_backtest)
+            if run_id is None:
+                await asyncio.sleep(2)
+                continue
+            worker_log.info("executing queued backtest run %d", run_id)
+            await asyncio.to_thread(pt_service.execute_queued_backtest, run_id)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:  # noqa: BLE001 — keep the worker alive
+            log.warning("backtest worker error: %s", exc)
+            await asyncio.sleep(2)
+
+
 async def _data_maintenance_loop() -> None:
     """Nightly free-data maintenance, in-process (PRD free-data-pipeline).
 
@@ -112,7 +142,7 @@ async def _data_maintenance_loop() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()  # idempotent; ensures tables exist when started via uvicorn lifespan
-    tasks = []
+    tasks = [asyncio.create_task(_backtest_worker_loop())]
     if settings.live_mark_enabled:
         tasks.append(asyncio.create_task(_live_mark_loop()))
     if settings.data_maintenance_enabled:

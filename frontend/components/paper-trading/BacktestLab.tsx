@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Integrity, ParameterSweep, paperTradingApi } from "@/lib/paperTradingApi";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { apiErrorText, Integrity, ParameterSweep, paperTradingApi, RunSummary } from "@/lib/paperTradingApi";
 import { Btn, Icon, Segmented, TextInput } from "./ptkit";
 import { AreaChart, Donut, ReturnBars, drawdownOf, Pt } from "./ptcharts";
 import { fmt, REGIMES, Model } from "./ptdata";
 
 interface Result {
+  context: string;  // which strategy + window produced this — selections may have moved on
   equity: Pt[]; bench: Pt[];
   stats: { final: number; totalRet: number; alpha: number; cagr: number; maxDD: number; winRate: number; best: number; worst: number };
   metrics: Record<string, number | null>;
@@ -45,7 +46,7 @@ function Legend({ color, label, dashed }: { color: string; label: string; dashed
   );
 }
 
-function adapt(data: any, capital: number): Result {
+function adapt(data: any, capital: number, context: string): Result {
   const curve = data.run?.equity_curve ?? [];
   const equity: Pt[] = curve.map((p: any, i: number) => ({ t: i, v: p.equity, d: p.date }));
   const bench: Pt[] = curve.map((p: any, i: number) => ({ t: i, v: p.benchmark_equity ?? p.equity, d: p.date }));
@@ -61,11 +62,12 @@ function adapt(data: any, capital: number): Result {
   const winRate = (m.win_rate != null ? (m.win_rate <= 1.5 ? m.win_rate * 100 : m.win_rate) : 0);
   const trades = data.run?.trades ?? [];
   const pnls = trades.map((t: any) => t.value).filter((v: any) => typeof v === "number");
-  const holdingsRaw = data.holdings ?? [];
+  const holdingsRaw = (data.run?.holdings?.length ? data.run.holdings : data.holdings) ?? [];
   const holdings = holdingsRaw.length
     ? holdingsRaw.map((h: any) => ({ ticker: h.ticker ?? "—", w: Math.round((h.weight ?? h.w ?? 0) * ((h.weight ?? h.w ?? 0) <= 1 ? 100 : 1)) })).filter((h: any) => h.w > 0)
     : [{ ticker: "Cash", w: 100 }];
   return {
+    context,
     equity, bench,
     stats: { final, totalRet, alpha: totalRet - benchRet, cagr, maxDD, winRate, best: pnls.length ? Math.max(...pnls) : 0, worst: pnls.length ? Math.min(...pnls) : 0 },
     metrics: m,
@@ -154,22 +156,34 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
   const [regimeId, setRegimeId] = useState(initialRegime || "gfc");
   const [customStart, setCustomStart] = useState("2015-01-01");
   const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().slice(0, 10));
-  const [capital, setCapital] = useState(100000);
+  // Free typing; clamp only on blur so "5" can become "50000".
+  const [capitalText, setCapitalText] = useState("100000");
+  const capital = Math.max(1000, parseInt(capitalText.replace(/\D/g, "") || "0", 10) || 0);
   const [result, setResult] = useState<Result | null>(null);
-  const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState<null | "queued" | "running">(null);
   const [error, setError] = useState<string | null>(null);
+  const [recent, setRecent] = useState<RunSummary[]>([]);
   const [sweepParam, setSweepParam] = useState("");
   const [sweepValues, setSweepValues] = useState("");
   const [sweep, setSweep] = useState<ParameterSweep | null>(null);
   const [sweepRunning, setSweepRunning] = useState(false);
   const [sweepError, setSweepError] = useState<string | null>(null);
+  // Supersede protection: only the newest run may write results; older polls abort,
+  // and their still-queued server jobs are cancelled best-effort.
+  const runSeq = useRef(0);
+  const runAbort = useRef<AbortController | null>(null);
+  const activeRun = useRef<{ id: number; settled: boolean } | null>(null);
 
   const model = models.find((m) => m.id === stratId) || models[0];
   const isoOk = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
   const regime = regimeId === "custom"
     ? { id: "custom", label: "Custom", sub: "Custom window", start: customStart, end: customEnd }
     : (REGIMES.find((r) => r.id === regimeId) ?? REGIMES[0]);
-  const sweepOptions = useMemo(() => numericParams(model?.parameters ?? {}), [model?.id, model?.parameters]);
+  // Key on parameter CONTENT, not object identity — the page rebuilds model objects on
+  // every background refresh, and resetting here would wipe the user's sweep mid-typing.
+  const paramsKey = useMemo(() => JSON.stringify(model?.parameters ?? {}), [model?.parameters]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const sweepOptions = useMemo(() => numericParams(model?.parameters ?? {}), [paramsKey]);
 
   useEffect(() => {
     const first = sweepOptions[0];
@@ -179,18 +193,71 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
     setSweepValues(defaultSweepValues(first?.value));
   }, [model?.id, sweepOptions]);
 
+  const refreshRecent = useCallback(async () => {
+    if (!model?.id) return;
+    try {
+      const res = await paperTradingApi.listBacktests(model.id, 8);
+      setRecent(res.data.runs);
+    } catch { /* the history rail is non-critical */ }
+  }, [model?.id]);
+  useEffect(() => { refreshRecent(); }, [refreshRecent]);
+
+  const cancelActive = () => {
+    runAbort.current?.abort();
+    const prev = activeRun.current;
+    if (prev && !prev.settled) paperTradingApi.cancelBacktest(prev.id).catch(() => {});
+    activeRun.current = null;
+  };
+  // Leaving the lab: stop polling and cancel anything still queued.
+  useEffect(() => () => cancelActive(), []);
+
   async function run() {
     if (!model) return;
-    setRunning(true); setResult(null); setError(null);
+    const seq = ++runSeq.current;
+    cancelActive();
+    const abort = new AbortController();
+    runAbort.current = abort;
+    const capitalNow = capital;
+    const context = `${model.name} · ${regime.start} → ${regime.end}`;
+    setPhase("queued"); setResult(null); setError(null);
     try {
-      const res = await paperTradingApi.runBacktest({
+      const queued = await paperTradingApi.queueBacktest({
         strategy_id: model.id, tickers: model.parameters?.tickers ?? [],
-        start_date: regime.start, end_date: regime.end, starting_cash: capital, benchmark: "SPY",
+        start_date: regime.start, end_date: regime.end, starting_cash: capitalNow, benchmark: "SPY",
       });
-      setResult(adapt(res.data, capital));
+      let job = queued.data.run;
+      activeRun.current = { id: job.id, settled: false };
+      while (job.status === "queued" || job.status === "running") {
+        if (abort.signal.aborted || seq !== runSeq.current) return;
+        setPhase(job.status);
+        await new Promise((r) => setTimeout(r, 1500));
+        if (abort.signal.aborted || seq !== runSeq.current) return;
+        job = (await paperTradingApi.getBacktest(job.id)).data.run;
+      }
+      if (activeRun.current?.id === job.id) activeRun.current.settled = true;
+      if (abort.signal.aborted || seq !== runSeq.current) return;  // superseded — drop the stale response
+      if (job.status === "failed") setError(job.warnings?.[0] || "Backtest failed.");
+      else if (job.status === "cancelled") setError("Backtest was cancelled.");
+      else setResult(adapt({ run: job }, capitalNow, context));
+      refreshRecent();
     } catch (e: any) {
-      setError(e.message || "Backtest failed.");
-    } finally { setRunning(false); }
+      if (abort.signal.aborted || seq !== runSeq.current) return;
+      setError(apiErrorText(e) || "Backtest failed.");
+    } finally {
+      if (seq === runSeq.current) setPhase(null);
+    }
+  }
+
+  async function loadRun(id: number) {
+    runSeq.current++;
+    cancelActive();
+    setPhase(null); setError(null);
+    try {
+      const res = await paperTradingApi.getBacktest(id);
+      const job = res.data.run;
+      if (job.status !== "completed") { setError(`That run is ${job.status} — nothing to display.`); return; }
+      setResult(adapt({ run: job }, (job as any).starting_cash ?? 100000, job.name));
+    } catch (e: any) { setError(apiErrorText(e)); }
   }
   async function runSweep() {
     if (!model || !sweepParam) return;
@@ -237,9 +304,10 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
         </div>
         <div style={{ flex: "0 1 160px" }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>Starting capital</div>
-          <TextInput mono value={capital} onChange={(v) => setCapital(Math.max(1000, parseInt(v.replace(/\D/g, "") || "0", 10)))} />
+          <TextInput mono value={capitalText} onChange={setCapitalText} onBlur={() => setCapitalText(String(capital))} placeholder="100000" />
         </div>
-        <Btn variant="primary" icon="play" iconFill onClick={run} style={{ minWidth: 110 }}>{running ? "Running…" : "Run"}</Btn>
+        <Btn variant="primary" icon="play" iconFill onClick={run} disabled={!!phase} style={{ minWidth: 110 }}>
+          {phase === "queued" ? "Queued…" : phase === "running" ? "Running…" : "Run"}</Btn>
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", justifyContent: "space-between" }}>
@@ -253,7 +321,7 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
             <TextInput mono value={customStart} onChange={setCustomStart} placeholder="YYYY-MM-DD" style={{ width: 132, padding: "8px 10px", fontSize: 13 }} />
             <span style={{ color: "var(--text-3)" }}>→</span>
             <TextInput mono value={customEnd} onChange={setCustomEnd} placeholder="YYYY-MM-DD" style={{ width: 132, padding: "8px 10px", fontSize: 13 }} />
-            <Btn variant="soft" icon="play" onClick={run} disabled={!isoOk(customStart) || !isoOk(customEnd) || customEnd <= customStart}>Test window</Btn>
+            <Btn variant="soft" icon="play" onClick={run} disabled={!!phase || !isoOk(customStart) || !isoOk(customEnd) || customEnd <= customStart}>Test window</Btn>
           </div>
         ) : (
           <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{regime.sub} · {regime.start} → {regime.end}</span>
@@ -307,6 +375,38 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
         )}
       </div>
 
+      {recent.length > 0 && (
+        <div className="card" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "13px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="eyebrow">Recent runs · {model?.name}</span>
+            <span className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>{recent.length} stored</span>
+          </div>
+          <div>
+            {recent.map((r) => {
+              const tone = r.status === "completed" ? "var(--pos)" : r.status === "failed" ? "var(--neg)"
+                : r.status === "cancelled" ? "var(--text-3)" : "var(--accent-2)";
+              const ret = r.metrics?.total_return;
+              return (
+                <button key={r.id} onClick={() => r.status === "completed" && loadRun(r.id)}
+                  disabled={r.status !== "completed"}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "9px 16px", background: "none",
+                    border: "none", borderTop: "1px solid var(--border)", cursor: r.status === "completed" ? "pointer" : "default",
+                    textAlign: "left", fontFamily: "var(--font-sans)" }}>
+                  <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: tone, textTransform: "uppercase", width: 76, flexShrink: 0 }}>{r.status}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {r.start_date} → {r.end_date}{r.sweep ? " · sweep" : ""}
+                  </span>
+                  <span className="mono" style={{ fontSize: 12, color: typeof ret === "number" ? (ret >= 0 ? "var(--pos)" : "var(--neg)") : "var(--text-3)", width: 74, textAlign: "right" }}>
+                    {typeof ret === "number" ? fmt.pct(ret * 100) : "—"}
+                  </span>
+                  {r.status === "completed" && <span style={{ color: "var(--text-3)", flexShrink: 0 }}><Icon name="chevronDown" size={13} style={{ transform: "rotate(-90deg)" }} /></span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {model?.isRule && model.methodology && (
         <div className="card" style={{ padding: "13px 16px", display: "flex", gap: 10, alignItems: "flex-start", background: "var(--surface-2)" }}>
           <span style={{ color: "var(--accent-2)", marginTop: 1 }}><Icon name="sparkles" size={15} fill /></span>
@@ -316,25 +416,28 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
         </div>
       )}
 
-      {running && (
+      {phase && (
         <div className="card" style={{ height: 320, display: "grid", placeItems: "center", color: "var(--text-3)" }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ width: 30, height: 30, border: "3px solid var(--surface-3)", borderTopColor: "var(--accent)", borderRadius: 999, margin: "0 auto 14px", animation: "pt-spin .8s linear infinite" }} />
-            <div className="mono" style={{ fontSize: 13 }}>Simulating {model?.name} · {regime.label}…</div>
+            <div className="mono" style={{ fontSize: 13 }}>
+              {phase === "queued" ? `Queued — ${model?.name} · ${regime.label} starts when the engine frees up…` : `Simulating ${model?.name} · ${regime.label}…`}
+            </div>
+            <div style={{ fontSize: 11.5, marginTop: 6 }}>The run keeps going server-side even if you leave this tab — find it under Recent runs.</div>
           </div>
         </div>
       )}
 
-      {error && !running && (
+      {error && !phase && (
         <div className="card" style={{ padding: 24, color: "var(--neg)", fontSize: 14 }}>{error}</div>
       )}
 
-      {result && !running && (
+      {result && !phase && (
         <>
           <div className="card" style={{ padding: 24 }}>
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 8 }}>
               <div>
-                <div className="eyebrow" style={{ marginBottom: 6 }}>Ending balance · {model?.name}</div>
+                <div className="eyebrow" style={{ marginBottom: 6 }}>Ending balance · {result.context}</div>
                 <div className="mono" style={{ fontSize: 34, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}>{fmt.usd0(result.stats.final)}</div>
               </div>
               <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
@@ -344,7 +447,7 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
             </div>
             <AreaChart series={result.equity} benchmark={result.bench} color={up ? "var(--pos)" : "var(--neg)"} height={230} uid="bt" valueFmt={fmt.usd0} seriesLabel={(model?.name?.length ?? 0) > 16 ? "Strategy" : (model?.name || "Strategy")} benchLabel="S&P 500" />
             <div style={{ marginTop: 10, padding: "10px 14px", background: beat ? "var(--pos-soft)" : "var(--neg-soft)", borderRadius: "var(--r-sm)", fontSize: 13, color: beat ? "var(--pos)" : "var(--neg)", fontWeight: 500 }}>
-              {beat ? `Beat the market by ${result.stats.alpha.toFixed(1)} pts over ${regime.sub.toLowerCase()}.` : `Trailed the market by ${Math.abs(result.stats.alpha).toFixed(1)} pts — the ${regime.sub.toLowerCase()} was unforgiving.`}
+              {beat ? `Beat the market by ${result.stats.alpha.toFixed(1)} pts over this window.` : `Trailed the market by ${Math.abs(result.stats.alpha).toFixed(1)} pts over this window.`}
             </div>
             {result.warnings.length > 0 && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-3)" }}>{result.warnings.slice(0, 2).join(" · ")}</div>}
           </div>

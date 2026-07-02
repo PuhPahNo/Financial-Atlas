@@ -37,6 +37,9 @@ class BacktestRun(Base):
     start_date = Column(Date)
     end_date = Column(Date)
     starting_cash = Column(Float)
+    # Job lifecycle: queued → running → completed | failed | cancelled.
+    # NULL (legacy rows written before the async queue) means completed.
+    status = Column(String, default="completed")
     inputs_json = Column(JSON, default=dict)
     metrics_json = Column(JSON, default=dict)
     warnings_json = Column(JSON, default=list)

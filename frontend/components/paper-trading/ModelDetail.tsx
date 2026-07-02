@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { paperTradingApi } from "@/lib/paperTradingApi";
+import { runBacktestAndWait } from "@/lib/paperTradingApi";
 import { Btn, CatDot, IconBtn } from "./ptkit";
 import { AreaChart, Donut, DONUT_PALETTE, drawdownOf, Pt } from "./ptcharts";
 import { fmt, CatMeta, Model, defaultBacktestWindow, metricStateLabel, metricStateTip } from "./ptdata";
@@ -15,42 +15,47 @@ function StatBox({ label, value, tone }: { label: string; value: string | number
   );
 }
 
-interface Live { equity: Pt[]; benchmark?: Pt[]; cagr: number; maxDD: number; winRate: number; trades: number; window: { start: string; end: string } }
+interface Live { equity: Pt[]; benchmark?: Pt[]; cagr: number; maxDD: number; winRate: number; trades: number; sharpe: number | null; window: { start: string; end: string } }
 
 export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, onDelete, onBacktested }: {
   model: Model | null; cat?: CatMeta; onClose: () => void; onEdit: (m: Model) => void; onBacktest: (m: Model) => void; onDelete: (m: Model) => void; onBacktested?: () => void }) {
   const [live, setLive] = useState<Live | null>(null);
   const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   // Lazily backtest a model the first time it's opened (seeded models have no run yet),
   // so the detail shows real equity instead of an illustrative series.
   useEffect(() => {
     setLive(null);
+    setRunError(null);
     if (!model || model.backtested) return;
-    let cancelled = false;
+    // Queued job + polling; closing the drawer aborts the POLLING only — the server
+    // still finishes and persists the headline, so reopening shows real results.
+    const abort = new AbortController();
     (async () => {
       setRunning(true);
       try {
         const w = defaultBacktestWindow();
-        const res = await paperTradingApi.runBacktest({
+        const run = await runBacktestAndWait({
           strategy_id: model.id, tickers: model.parameters?.tickers ?? [],
           start_date: w.start, end_date: w.end, starting_cash: 100000, benchmark: "SPY", persist_headline: true,
-        });
-        if (cancelled) return;
-        const eq = res.data.run.equity_curve || [];
+        }, { signal: abort.signal });
+        const eq = run.equity_curve || [];
         const equity: Pt[] = eq.map((p: any, i: number) => ({ t: i, v: p.equity, d: p.date }));
         const benchmark: Pt[] = eq.map((p: any, i: number) => ({ t: i, v: p.benchmark_equity, d: p.date }));
         const start = equity[0]?.v ?? 100000, final = equity[equity.length - 1]?.v ?? 100000;
-        const mm: any = res.data.run.metrics || {};
+        const mm: any = run.metrics || {};
         setLive({
           equity, benchmark, cagr: (final / start - 1) * 100, maxDD: drawdownOf(equity).maxDD,
           winRate: mm.win_rate != null ? (mm.win_rate <= 1.5 ? mm.win_rate * 100 : mm.win_rate) : 0,
-          trades: (res.data.run.trades || []).length, window: w,
+          trades: (run.trades || []).length, sharpe: typeof mm.sharpe === "number" ? mm.sharpe : null, window: w,
         });
         onBacktested?.();
-      } catch { /* keep illustrative on failure */ } finally { if (!cancelled) setRunning(false); }
+      } catch (e: any) {
+        if (e?.name !== "AbortError" && !abort.signal.aborted) setRunError(e?.message || "Backtest failed");
+      } finally { if (!abort.signal.aborted) setRunning(false); }
     })();
-    return () => { cancelled = true; };
+    return () => abort.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.id]);
 
@@ -62,7 +67,7 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
   const totalRet = model.backtested ? model.sincePct : (live?.cagr ?? model.sincePct);
   const win = model.backtested ? model.backtestWindow : live?.window;
   const stats = live
-    ? { ...model.stats, cagr: live.cagr, maxDD: live.maxDD, winRate: live.winRate, trades: live.trades }
+    ? { ...model.stats, cagr: live.cagr, maxDD: live.maxDD, winRate: live.winRate, trades: live.trades, sharpe: live.sharpe }
     : model.stats;
   const up = totalRet >= 0;
 
@@ -91,8 +96,11 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
         <div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginBottom: 4, flexWrap: "wrap" }}>
             <span className="mono" style={{ fontSize: 34, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}>{fmt.pct(totalRet)}</span>
-            <span style={{ fontSize: 13, color: "var(--text-3)" }}>
-              {running ? "backtesting on real prices…" : isLive && win ? `total return · ${win.start} → ${win.end} vs S&P 500` : "illustrative equity (run a backtest for live results)"}
+            <span style={{ fontSize: 13, color: runError ? "var(--neg)" : "var(--text-3)" }}>
+              {running ? "backtesting on real prices…"
+                : runError ? `backtest failed: ${runError}`
+                : isLive && win ? `total return · ${win.start} → ${win.end} vs S&P 500`
+                : "illustrative equity (run a backtest for live results)"}
             </span>
           </div>
           <div className="card" style={{ padding: "14px 8px 4px", background: "var(--surface-2)", borderRadius: "var(--r-md)", position: "relative" }}>
@@ -108,10 +116,10 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
 
         <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
           <StatBox label="Return" value={fmt.pct(stats.cagr)} tone={stats.cagr >= 0 ? "pos" : "neg"} />
-          <StatBox label="Sharpe" value={stats.sharpe.toFixed(2)} />
+          <StatBox label="Sharpe" value={stats.sharpe != null ? stats.sharpe.toFixed(2) : "—"} />
           <StatBox label="Max DD" value={stats.maxDD.toFixed(1) + "%"} tone="neg" />
           <StatBox label="Win rate" value={isLive ? stats.winRate.toFixed(0) + "%" : "—"} />
-          <StatBox label="Trades" value={stats.trades} />
+          <StatBox label="Trades" value={isLive ? stats.trades : "—"} />
           <StatBox label="Author" value={model.author} />
         </div>
 

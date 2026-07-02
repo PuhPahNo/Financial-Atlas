@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { paperTradingApi, TraderAccount } from "@/lib/paperTradingApi";
-import { Icon, SlideOver, ConfirmDialog } from "@/components/paper-trading/ptkit";
-import { Sparkline } from "@/components/paper-trading/ptcharts";
-import { catMeta, toModel, getFavorites, toggleFavorite, genSeries, defaultBacktestWindow, fmt, CatMeta, Model } from "@/components/paper-trading/ptdata";
+import { apiErrorText, paperTradingApi, runBacktestAndWait, TraderAccount } from "@/lib/paperTradingApi";
+import { Icon, SlideOver, ConfirmDialog, Btn } from "@/components/paper-trading/ptkit";
+import { catMeta, toModel, getFavorites, toggleFavorite, defaultBacktestWindow, fmt, CatMeta, Model } from "@/components/paper-trading/ptdata";
 import BotsView from "@/components/paper-trading/BotsView";
 import ModelDetail from "@/components/paper-trading/ModelDetail";
 import Builder from "@/components/paper-trading/Builder";
@@ -35,7 +34,9 @@ export default function PaperTradingPage() {
   const [editing, setEditing] = useState<Model | null>(null);
   const [delTarget, setDelTarget] = useState<Model | null>(null);
   const [bt, setBt] = useState<{ id: number | null; regime: string }>({ id: null, regime: "gfc" });
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [accounts, setAccounts] = useState<TraderAccount[]>([]);
   const [traderDetail, setTraderDetail] = useState<TraderAccount | null>(null);
   const [traderForm, setTraderForm] = useState<{ open: boolean; seed: TraderAccount | null }>({ open: false, seed: null });
@@ -48,6 +49,10 @@ export default function PaperTradingPage() {
       setCats(cs.map(catMeta));
       setStrategies(cs.flatMap((c: any) => c.strategies || []));
       setAccounts(accRes.data.accounts || []);
+      setLoadError(null);
+    } catch (e) {
+      // Don't masquerade a dead backend as an empty catalog.
+      setLoadError(apiErrorText(e));
     } finally { setLoading(false); }
   }, []);
 
@@ -78,7 +83,7 @@ export default function PaperTradingPage() {
       while (queue.length) {
         const m = queue.shift()!;
         try {
-          await paperTradingApi.runBacktest({
+          await runBacktestAndWait({
             strategy_id: m.id, tickers: m.parameters?.tickers ?? [],
             start_date: w.start, end_date: w.end, starting_cash: 100000, benchmark: "SPY", persist_headline: true,
           });
@@ -89,7 +94,11 @@ export default function PaperTradingPage() {
     worker().then(() => refresh());
   }, [loading, models, refresh]);
 
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2600); };
+  const flash = (text: string, tone: "ok" | "err" = "ok") => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ text, tone });
+    toastTimer.current = setTimeout(() => setToast(null), tone === "err" ? 5200 : 2600);
+  };
   const openBuilder = (m: Model | null) => { setEditing(m); setDetail(null); setView("builder"); };
   const openBacktest = (id: number) => { setBt({ id, regime: "gfc" }); setDetail(null); setView("backtest"); };
 
@@ -97,29 +106,34 @@ export default function PaperTradingPage() {
     try {
       const isRule = !!payload?.parameters?.rules;
       let id: number | null = editId;
-      if (editId) { await paperTradingApi.updateStrategy(editId, payload); flash(`Updated “${payload.name}”`); }
+      if (editId) {
+        // Edits never touch stored metrics — the real backtest headline must survive.
+        const { metrics: _metrics, history: _history, ...rest } = payload;
+        await paperTradingApi.updateStrategy(editId, rest);
+        flash(`Updated “${payload.name}”`);
+      }
       else { const res = await paperTradingApi.createStrategy(payload); id = res.data?.strategy?.id ?? null; flash(`Backtesting “${payload.name}” on real prices…`); }
       // Auto-run a headline backtest so the model is backtested the moment it's created.
       if (id) {
         const w = defaultBacktestWindow();
         try {
-          await paperTradingApi.runBacktest({
+          await runBacktestAndWait({
             strategy_id: id, tickers: payload?.parameters?.tickers ?? [],
             start_date: w.start, end_date: w.end, starting_cash: 100000, benchmark: "SPY", persist_headline: true,
           });
-        } catch { /* a backtest failure shouldn't block saving */ }
+        } catch (e) { flash(`Saved “${payload.name}”, but the backtest failed: ${apiErrorText(e)}`, "err"); }
       }
       await refresh();
       if (!editId) flash(`Added “${payload.name}” to your models`);
       // Rule strategies are best explored in the lab next.
       if (isRule && id) { setBt({ id, regime: "covid" }); setView("backtest"); }
       else { setView("bots"); }
-    } catch (e: any) { flash(e.message || "Could not save the strategy"); }
+    } catch (e: any) { flash(apiErrorText(e) || "Could not save the strategy", "err"); }
   }
   async function remove(m: Model) {
     setDelTarget(null); setDetail(null);
     try { await paperTradingApi.deleteStrategy(m.id); await refresh(); flash(`Archived “${m.name}”`); }
-    catch (e: any) { flash(e.message || "Could not archive"); }
+    catch (e: any) { flash(apiErrorText(e) || "Could not archive", "err"); }
   }
   const onToggleFav = (id: number) => setFavorites(toggleFavorite(id));
 
@@ -130,12 +144,12 @@ export default function PaperTradingPage() {
       setTraderForm({ open: false, seed: null });
       await refresh();
       flash(editId ? `Updated “${payload.name}”` : `Created trader “${payload.name}”`);
-    } catch (e: any) { flash(e.message || "Could not save the trader"); }
+    } catch (e: any) { flash(apiErrorText(e) || "Could not save the trader", "err"); }
   }
   async function removeTrader(a: TraderAccount) {
     setTraderDel(null); setTraderDetail(null);
     try { await paperTradingApi.deleteAccount(a.id); await refresh(); flash(`Archived “${a.name}”`); }
-    catch (e: any) { flash(e.message || "Could not archive"); }
+    catch (e: any) { flash(apiErrorText(e) || "Could not archive", "err"); }
   }
   const editTrader = (a: TraderAccount) => { setTraderDetail(null); setTraderForm({ open: true, seed: a }); };
 
@@ -171,12 +185,11 @@ export default function PaperTradingPage() {
             {accounts.length > 0 ? (
               <>
                 <div className="mono" style={{ fontSize: 21, fontWeight: 600, marginBottom: 2 }}>{fmt.usd0(totalCapital)}</div>
-                <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 10 }}>{accounts.length} trader{accounts.length > 1 ? "s" : ""} · manage →</div>
-                <Sparkline series={genSeries(7, 40, { drift: 0.0008, vol: 0.01 })} color="var(--pos)" height={28} />
+                <div style={{ fontSize: 12, color: "var(--text-3)" }}>{accounts.length} trader{accounts.length > 1 ? "s" : ""} · starting capital · manage →</div>
               </>
             ) : (
               <>
-                <div className="mono" style={{ fontSize: 21, fontWeight: 600, marginBottom: 2 }}>$128,440</div>
+                <div className="mono" style={{ fontSize: 21, fontWeight: 600, marginBottom: 2 }}>$0</div>
                 <div style={{ fontSize: 12, color: "var(--text-3)" }}>Create your first trader →</div>
               </>
             )}
@@ -203,6 +216,12 @@ export default function PaperTradingPage() {
               <div style={{ display: "grid", placeItems: "center", height: 320 }}>
                 <div style={{ width: 28, height: 28, border: "3px solid var(--surface-3)", borderTopColor: "var(--accent)", borderRadius: 999, animation: "pt-spin .8s linear infinite" }} />
               </div>
+            ) : loadError ? (
+              <div className="card" style={{ padding: 28, maxWidth: 520, border: "1px solid var(--neg)", background: "var(--neg-soft)" }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-1)", marginBottom: 6 }}>Couldn't load the paper-trading desk</div>
+                <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.5, marginBottom: 16 }}>{loadError}</div>
+                <Btn variant="primary" onClick={() => { setLoading(true); refresh(); }}>Retry</Btn>
+              </div>
             ) : (
               <>
                 {view === "bots" && <BotsView models={models} cats={cats} onOpen={setDetail} onNew={() => openBuilder(null)} onEdit={openBuilder} onDelete={setDelTarget} onToggleFav={onToggleFav} />}
@@ -220,7 +239,7 @@ export default function PaperTradingPage() {
       </SlideOver>
 
       <ConfirmDialog open={!!delTarget} title="Archive this model?"
-        body={delTarget ? `“${delTarget.name}” will leave the active model list. Historical backtests and account allocations keep their stored snapshots.` : ""}
+        body={delTarget ? `“${delTarget.name}” will leave the active model list. Traders still allocated to it keep simulating it until you remove those allocations.` : ""}
         confirmLabel="Archive"
         onClose={() => setDelTarget(null)} onConfirm={() => delTarget && remove(delTarget)} />
 
@@ -237,8 +256,9 @@ export default function PaperTradingPage() {
 
       {toast && (
         <div className="pt-scope" style={{ position: "fixed", bottom: 26, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 10,
-          padding: "12px 18px", background: "var(--surface-3)", border: "1px solid var(--border-strong)", borderRadius: "var(--r-pill)", boxShadow: "var(--shadow-pop)", fontSize: 13.5, fontWeight: 500, color: "var(--text-1)", animation: "pt-fadeUp .25s var(--ease)" }}>
-          <span style={{ color: "var(--pos)", display: "grid", placeItems: "center" }}><Icon name="sparkles" size={15} fill /></span>{toast}
+          padding: "12px 18px", background: "var(--surface-3)", border: `1px solid ${toast.tone === "err" ? "var(--neg)" : "var(--border-strong)"}`, borderRadius: "var(--r-pill)", boxShadow: "var(--shadow-pop)", fontSize: 13.5, fontWeight: 500, color: "var(--text-1)", animation: "pt-fadeUp .25s var(--ease)", maxWidth: "min(84vw, 640px)" }}>
+          <span style={{ color: toast.tone === "err" ? "var(--neg)" : "var(--pos)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <Icon name={toast.tone === "err" ? "shield" : "sparkles"} size={15} fill={toast.tone !== "err"} /></span>{toast.text}
         </div>
       )}
     </div>

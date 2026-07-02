@@ -58,6 +58,10 @@ class BacktestRequest(BaseModel):
     slippage_bps: float = Field(default=5.0, ge=0, le=100)
     use_fixture_data: bool = False
     persist_headline: bool = False  # store a compact equity preview on the strategy
+    # queue=True enqueues the run and returns immediately with status="queued";
+    # poll GET /backtests/{id}. Long runs otherwise die at proxy timeouts
+    # (Next dev proxy ~30s, Render edge ~100s) while the engine keeps grinding.
+    queue: bool = False
     assistant_context: dict[str, Any] = Field(default_factory=dict)
 
 

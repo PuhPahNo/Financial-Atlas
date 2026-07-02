@@ -189,7 +189,9 @@ def clone_strategy(strategy_id: int) -> dict:
             methodology=source.methodology,
             parameters_json=source.parameters_json or {},
             defaults_json=source.defaults_json or {},
-            metrics_json=source.metrics_json or {},
+            # A clone has no runs of its own — inheriting the source's backtest
+            # headline would show results this strategy never produced.
+            metrics_json={},
             caveats_json=source.caveats_json or [],
         )
         session.add(clone)
@@ -221,11 +223,14 @@ def _run_view(run: BacktestRun) -> dict:
         "start_date": run.start_date.isoformat(),
         "end_date": run.end_date.isoformat(),
         "starting_cash": run.starting_cash,
+        "status": run.status or "completed",  # legacy rows predate the job queue
+        "created_at": run.created_at.isoformat() if run.created_at else None,
         "inputs": inputs,
         "strategy_snapshot": inputs.get("strategy_snapshot"),
         "metrics": run.metrics_json or {},
         "warnings": run.warnings_json or [],
         "integrity": inputs.get("integrity"),
+        "holdings": inputs.get("holdings") or [],
         "trades": [{
             "date": trade.trade_date.isoformat(),
             "ticker": trade.ticker,
@@ -261,19 +266,40 @@ def _persist_backtest_result(
     starting_cash: float,
     inputs: dict[str, Any],
     result: dict,
+    run_id: int | None = None,
 ) -> int:
+    # Final allocation travels with the run so polled/listed runs can render it.
+    inputs = {**inputs, "holdings": _json_dates(result.get("holdings") or [])}
     with session_scope() as session:
-        run = BacktestRun(
-            strategy_id=strategy_id,
-            name=name,
-            start_date=start_date,
-            end_date=end_date,
-            starting_cash=starting_cash,
-            inputs_json=inputs,
-            metrics_json=result["metrics"],
-            warnings_json=result["warnings"],
-        )
-        session.add(run)
+        if run_id is not None:
+            # Queued job completing — fill the existing row instead of creating one.
+            run = session.get(BacktestRun, run_id)
+            if run is None:
+                raise NotFoundError(f"Backtest {run_id} not found")
+            run.strategy_id = strategy_id
+            run.name = name
+            run.start_date = start_date
+            run.end_date = end_date
+            run.starting_cash = starting_cash
+            run.inputs_json = inputs
+            run.metrics_json = result["metrics"]
+            run.warnings_json = result["warnings"]
+            run.status = "completed"
+            session.query(BacktestTrade).filter_by(run_id=run.id).delete(synchronize_session=False)
+            session.query(BacktestEquityPoint).filter_by(run_id=run.id).delete(synchronize_session=False)
+        else:
+            run = BacktestRun(
+                strategy_id=strategy_id,
+                name=name,
+                start_date=start_date,
+                end_date=end_date,
+                starting_cash=starting_cash,
+                status="completed",
+                inputs_json=inputs,
+                metrics_json=result["metrics"],
+                warnings_json=result["warnings"],
+            )
+            session.add(run)
         session.flush()
         for trade in result["trades"]:
             session.add(BacktestTrade(
@@ -298,9 +324,8 @@ def _persist_backtest_result(
         return run.id
 
 
-def run_backtest(payload: BacktestRequest) -> dict:
-    ensure_seeded()
-    tickers = normalize_tickers(payload.tickers)
+def _resolve_strategy_view(payload: BacktestRequest) -> dict:
+    """Load + validate the strategy a backtest request targets (fail-fast)."""
     with session_scope() as session:
         if payload.strategy_id:
             strategy = session.get(TradingStrategy, payload.strategy_id)
@@ -311,9 +336,15 @@ def run_backtest(payload: BacktestRequest) -> dict:
             strategy_view = payload.strategy.model_dump()
         else:
             raise ValidationError("strategy_id or inline strategy is required")
-
     validation = validate_or_raise(strategy_view["category"], strategy_view.get("parameters", {}))
     strategy_view["parameters"] = validation["parameters"]
+    return strategy_view
+
+
+def run_backtest(payload: BacktestRequest, *, run_id: int | None = None) -> dict:
+    ensure_seeded()
+    tickers = normalize_tickers(payload.tickers)
+    strategy_view = _resolve_strategy_view(payload)
 
     result = execute_backtest(
         strategy=strategy_view,
@@ -335,6 +366,7 @@ def run_backtest(payload: BacktestRequest) -> dict:
         inputs=_inputs_with_snapshot(payload.model_dump(mode="json"), strategy_view,
                                      {"integrity": result.get("integrity")}),
         result=result,
+        run_id=run_id,
     )
 
     if payload.persist_headline and payload.strategy_id:
@@ -343,6 +375,118 @@ def run_backtest(payload: BacktestRequest) -> dict:
     with session_scope() as session:
         run = session.get(BacktestRun, run_id)
         return {"run": _run_view(run), "served_by": result["served_by"], "holdings": _json_dates(result["holdings"])}
+
+
+# --------------------------------------------------------------------------- #
+# Async backtest jobs                                                          #
+#                                                                              #
+# POST /backtests with queue=true creates a queued BacktestRun row and returns #
+# immediately; a single in-process worker (main.py) executes jobs under the    #
+# engine lock and the client polls GET /backtests/{id}. This keeps long runs   #
+# alive across proxy timeouts (Next dev ~30s, Render edge ~100s) and stops     #
+# duplicate concurrent runs of the same strategy/window.                       #
+# --------------------------------------------------------------------------- #
+
+def enqueue_backtest(payload: BacktestRequest) -> dict:
+    ensure_seeded()
+    strategy_view = _resolve_strategy_view(payload)  # fail-fast before queuing
+    with session_scope() as session:
+        if payload.strategy_id:
+            # Dedupe: identical pending work returns the existing job instead of stacking
+            # multi-minute engine runs behind the lock.
+            existing = session.query(BacktestRun).filter(
+                BacktestRun.strategy_id == payload.strategy_id,
+                BacktestRun.status.in_(("queued", "running")),
+                BacktestRun.start_date == payload.start_date,
+                BacktestRun.end_date == payload.end_date,
+            ).first()
+            if existing:
+                return {"run": _run_view(existing)}
+        run = BacktestRun(
+            strategy_id=payload.strategy_id,
+            name=f"{strategy_view['name']} {payload.start_date} to {payload.end_date}",
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            starting_cash=payload.starting_cash,
+            status="queued",
+            inputs_json=_inputs_with_snapshot(payload.model_dump(mode="json"), strategy_view),
+            metrics_json={},
+            warnings_json=[],
+        )
+        session.add(run)
+        session.flush()
+        return {"run": _run_view(run)}
+
+
+def claim_next_queued_backtest() -> int | None:
+    """Oldest queued run id, marked running. Single-worker, so no claim race."""
+    with session_scope() as session:
+        run = session.query(BacktestRun).filter_by(status="queued").order_by(BacktestRun.id.asc()).first()
+        if run is None:
+            return None
+        run.status = "running"
+        return run.id
+
+
+def execute_queued_backtest(run_id: int) -> None:
+    """Execute one claimed job to completion (worker thread)."""
+    with session_scope() as session:
+        run = session.get(BacktestRun, run_id)
+        if run is None or run.status != "running":
+            return
+        request_data = {k: v for k, v in (run.inputs_json or {}).items()
+                        if k not in ("strategy_snapshot", "integrity", "holdings")}
+    try:
+        payload = BacktestRequest(**request_data)
+        run_backtest(payload, run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 — the job row is the error surface
+        with session_scope() as session:
+            run = session.get(BacktestRun, run_id)
+            if run is not None:
+                run.status = "failed"
+                message = getattr(exc, "message", None) or str(exc) or "Backtest failed"
+                run.warnings_json = [message]
+
+
+def fail_interrupted_backtests() -> int:
+    """Boot-time sweep: anything still 'running' was killed by a restart."""
+    with session_scope() as session:
+        rows = session.query(BacktestRun).filter_by(status="running").all()
+        for run in rows:
+            run.status = "failed"
+            run.warnings_json = ["Backtest interrupted by a server restart — run it again."]
+        return len(rows)
+
+
+def cancel_backtest(run_id: int) -> dict:
+    """Cancel a still-queued run. Running jobs finish (the engine has no safe
+    mid-run abort); completed/failed runs are returned unchanged."""
+    with session_scope() as session:
+        run = session.get(BacktestRun, run_id)
+        if not run:
+            raise NotFoundError(f"Backtest {run_id} not found")
+        if run.status == "queued":
+            run.status = "cancelled"
+        return {"run": _run_view(run)}
+
+
+def list_backtests(*, strategy_id: int | None = None, limit: int = 20) -> dict:
+    with session_scope() as session:
+        q = session.query(BacktestRun).order_by(BacktestRun.id.desc())
+        if strategy_id:
+            q = q.filter(BacktestRun.strategy_id == strategy_id)
+        rows = q.limit(max(1, min(int(limit), 100))).all()
+        return {"runs": [{
+            "id": run.id,
+            "strategy_id": run.strategy_id,
+            "name": run.name,
+            "start_date": run.start_date.isoformat() if run.start_date else None,
+            "end_date": run.end_date.isoformat() if run.end_date else None,
+            "status": run.status or "completed",
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "metrics": run.metrics_json or {},
+            "sweep": bool((run.inputs_json or {}).get("sweep")),
+        } for run in rows]}
 
 
 def _set_parameter(parameters: dict[str, Any], path: str, value: float) -> None:
@@ -433,7 +577,8 @@ def run_parameter_sweep(payload: ParameterSweepRequest) -> dict:
             inputs=_inputs_with_snapshot(
                 base_inputs,
                 variant,
-                {"sweep": {"parameter": payload.parameter, "value": value, "rank_by": payload.rank_by}},
+                {"sweep": {"parameter": payload.parameter, "value": value, "rank_by": payload.rank_by},
+                 "integrity": result.get("integrity")},
             ),
             result={**result, "metrics": metrics},
         )

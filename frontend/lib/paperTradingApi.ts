@@ -8,9 +8,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<Envelope<T>
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = json?.error ?? {};
+    // FastAPI request-validation errors bypass the Atlas envelope: {"detail": [{loc, msg}, ...]}
+    if (!err.message && Array.isArray(json?.detail)) {
+      const msg = json.detail
+        .map((d: any) => `${(d.loc ?? []).filter((p: any) => p !== "body").join(".")}: ${d.msg}`)
+        .join("; ");
+      throw new ApiError("INVALID_REQUEST", msg || `Request failed (${res.status})`, json);
+    }
     throw new ApiError(err.code ?? "INTERNAL", err.message ?? `Request failed (${res.status})`, err);
   }
   return json as Envelope<T>;
+}
+
+/** Enqueue a backtest and poll until it settles. Throws ApiError on failed/cancelled.
+ * Abort the signal to stop POLLING — the server job itself keeps running (and its
+ * result still persists), which is what background/headline callers want. */
+export async function runBacktestAndWait(
+  payload: Record<string, unknown>,
+  opts: { signal?: AbortSignal; onStatus?: (status: RunStatus) => void; pollMs?: number } = {},
+): Promise<BacktestRun> {
+  const queued = await paperTradingApi.queueBacktest(payload);
+  let run = queued.data.run;
+  while (run.status === "queued" || run.status === "running") {
+    opts.onStatus?.(run.status);
+    if (opts.signal?.aborted) throw new DOMException("Backtest polling aborted", "AbortError");
+    await new Promise((r) => setTimeout(r, opts.pollMs ?? 1600));
+    if (opts.signal?.aborted) throw new DOMException("Backtest polling aborted", "AbortError");
+    run = (await paperTradingApi.getBacktest(run.id)).data.run;
+  }
+  if (run.status === "failed") throw new ApiError("BACKTEST_FAILED", run.warnings?.[0] || "Backtest failed");
+  if (run.status === "cancelled") throw new ApiError("BACKTEST_CANCELLED", "Backtest was cancelled");
+  opts.onStatus?.(run.status);
+  return run;
+}
+
+/** Human-readable message from an ApiError, including field-level validator issues. */
+export function apiErrorText(e: any): string {
+  const base = e?.message || "Request failed";
+  const issues = e?.details?.issues;
+  if (Array.isArray(issues) && issues.length) {
+    const lines = issues.map((i: any) => (i.field ? `${i.field}: ${i.message}` : i.message)).filter(Boolean);
+    return `${base} — ${lines.join("; ")}`;
+  }
+  return base;
 }
 
 const body = (value: unknown) => JSON.stringify(value);
@@ -52,15 +92,26 @@ export interface Integrity {
   checks: IntegrityCheck[];
   grade: "pass" | "warn" | "info";
 }
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface BacktestRun {
   id: number;
   strategy_id: number;
   name: string;
+  status: RunStatus;
+  created_at?: string | null;
+  start_date?: string;
+  end_date?: string;
   metrics: Record<string, number | null>;
   warnings: string[];
   integrity?: Integrity | null;
+  holdings?: { ticker: string; weight: number }[];
   trades: any[];
   equity_curve: { date: string; cash: number; equity: number; benchmark_equity: number }[];
+}
+export interface RunSummary {
+  id: number; strategy_id: number | null; name: string; status: RunStatus;
+  start_date: string | null; end_date: string | null; created_at: string | null;
+  metrics: Record<string, number | null>; sweep: boolean;
 }
 export interface SweepRun {
   rank: number;
@@ -148,6 +199,13 @@ export const paperTradingApi = {
     request<{ deleted: number }>(`/paper-trading/strategies/${id}`, { method: "DELETE" }),
   runBacktest: (payload: unknown) =>
     request<{ run: BacktestRun; holdings: any[] }>("/backtests", { method: "POST", body: body(payload) }),
+  queueBacktest: (payload: Record<string, unknown>) =>
+    request<{ run: BacktestRun }>("/backtests", { method: "POST", body: body({ ...payload, queue: true }) }),
+  getBacktest: (id: number) => request<{ run: BacktestRun }>(`/backtests/${id}`),
+  listBacktests: (strategyId?: number, limit = 20) =>
+    request<{ runs: RunSummary[] }>(`/backtests?limit=${limit}${strategyId ? `&strategy_id=${strategyId}` : ""}`),
+  cancelBacktest: (id: number) =>
+    request<{ run: BacktestRun }>(`/backtests/${id}/cancel`, { method: "POST", body: body({}) }),
   runSweep: (payload: unknown) =>
     request<{ sweep: ParameterSweep }>("/backtests/sweep", { method: "POST", body: body(payload) }),
   createPortfolio: (payload: unknown) =>
