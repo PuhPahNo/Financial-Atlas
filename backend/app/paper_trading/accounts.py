@@ -416,6 +416,13 @@ def account_performance(account_id: int, start: date | None = None, end: date | 
     return {
         "account_id": account_id,
         "window": {"start": start.isoformat(), "end": end.isoformat()},
+        # This "history" is a re-simulation of the CURRENT allocation over the window,
+        # not a realized trade record — it changes if the strategies or weights change.
+        # The frontend surfaces this so the equity curve isn't mistaken for a live track record.
+        "basis": "resimulated",
+        "basis_note": ("Simulated: the current allocation replayed over this window on real prices. "
+                       "Editing a strategy or its weights re-computes this curve — it is not a realized "
+                       "trade record."),
         "starting_cash": starting_cash,
         "cash_dollars": round(cash_dollars, 2),
         "current_value": round(current, 2),

@@ -199,6 +199,28 @@ def test_assistant_rebalance_account_requires_confirmation():
     assert {row["name"]: row["weight"] for row in allocations} == {"Assistant Rebalance A": 40, "Assistant Rebalance B": 20}
 
 
+def test_assistant_rebalance_preserves_unmentioned_sleeves():
+    """Naming only some sleeves must NOT liquidate the rest — the assistant merges the
+    named weights onto the account's current allocation (audit L5)."""
+    first = _create_strategy("Assistant Rebalance A")
+    second = _create_strategy("Assistant Rebalance B")
+    _create_account("Assistant Rebalance Trader",
+                    [{"strategy_id": first["id"], "weight": 10}, {"strategy_id": second["id"], "weight": 10}])
+
+    session_id = client.post("/api/v1/assistant/sessions", json={"title": "Test Rebalance Chat"}).json()["data"]["session"]["id"]
+    reply = client.post(
+        f"/api/v1/assistant/sessions/{session_id}/messages",
+        json={"message": "Rebalance Assistant Rebalance Trader to 40% Assistant Rebalance A"},
+    )
+    action = reply.json()["data"]["pending_actions"][0]
+    assert "keeping Assistant Rebalance B" in action["payload"]["action_details"]
+
+    confirmed = client.post(f"/api/v1/assistant/actions/{action['id']}/confirm", json={})
+    allocations = confirmed.json()["data"]["result"]["account"]["allocations"]
+    # A rebalanced to 40, B kept at 10 — not dropped to cash.
+    assert {row["name"]: row["weight"] for row in allocations} == {"Assistant Rebalance A": 40, "Assistant Rebalance B": 10}
+
+
 def test_copilot_can_create_backtest_and_assign_generated_model(monkeypatch):
     _create_account("Assistant Generated Trader")
 

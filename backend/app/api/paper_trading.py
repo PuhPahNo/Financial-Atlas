@@ -67,6 +67,16 @@ def delete_strategy(strategy_id: int):
     return envelope(service.delete_strategy(strategy_id))
 
 
+@router.get("/paper-trading/strategies-archived")
+def list_archived_strategies():
+    return envelope(service.list_archived_strategies())
+
+
+@router.post("/paper-trading/strategies/{strategy_id}/unarchive")
+def unarchive_strategy(strategy_id: int):
+    return envelope(service.unarchive_strategy(strategy_id))
+
+
 @router.post("/paper-trading/portfolios")
 def create_portfolio(payload: PortfolioCreate):
     return envelope(portfolio.create_portfolio(payload))

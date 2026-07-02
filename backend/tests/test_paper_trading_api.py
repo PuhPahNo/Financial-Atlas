@@ -44,9 +44,15 @@ def test_strategy_crud_clone_and_archive():
     assert cloned.status_code == 200
     assert cloned.json()["data"]["strategy"]["origin"] == "user"
 
-    deleted = client.delete(f"/api/v1/paper-trading/strategies/{strategy['id']}")
-    assert deleted.status_code == 200
-    assert deleted.json()["data"]["deleted"] == strategy["id"]
+    archived = client.delete(f"/api/v1/paper-trading/strategies/{strategy['id']}")
+    assert archived.status_code == 200
+    assert archived.json()["data"]["archived"] == strategy["id"]
+
+    # Archived strategy is recoverable via unarchive.
+    restored = client.post(f"/api/v1/paper-trading/strategies/{strategy['id']}/unarchive")
+    assert restored.status_code == 200
+    assert restored.json()["data"]["strategy"]["status"] == "active"
+    client.delete(f"/api/v1/paper-trading/strategies/{strategy['id']}")  # re-archive for cleanup
 
 
 def test_full_paper_trading_regression_create_save_backtest_assign_archive():

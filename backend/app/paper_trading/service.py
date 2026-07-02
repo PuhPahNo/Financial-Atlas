@@ -203,15 +203,56 @@ def validate_strategy(payload) -> dict:
     return validate_strategy_config(payload.category, payload.parameters)
 
 
+def _accounts_using_strategy(session, strategy_id: int) -> list[str]:
+    """Names of active trader accounts still allocated to this strategy."""
+    from ..models.paper_trading import AccountAllocation, TraderAccount
+    rows = (session.query(TraderAccount.name)
+            .join(AccountAllocation, AccountAllocation.account_id == TraderAccount.id)
+            .filter(AccountAllocation.strategy_id == strategy_id, TraderAccount.status == "active")
+            .distinct().all())
+    return [name for (name,) in rows]
+
+
 def delete_strategy(strategy_id: int) -> dict:
+    """Archive a user strategy. Archived strategies leave the active list but keep
+    simulating in any trader still allocated to them (that's why we report who) —
+    and stay recoverable via ``unarchive_strategy``."""
     with session_scope() as session:
         strategy = session.get(TradingStrategy, strategy_id)
         if not strategy or strategy.status != "active":
             raise NotFoundError(f"Strategy {strategy_id} not found")
         if strategy.origin == "seeded":
-            raise ValidationError("Seeded strategies cannot be deleted; clone them first")
+            raise ValidationError("Seeded strategies cannot be archived; clone them first")
         strategy.status = "archived"
-    return {"deleted": strategy_id}
+        in_use = _accounts_using_strategy(session, strategy_id)
+    return {"archived": strategy_id, "in_use_by": in_use}
+
+
+def unarchive_strategy(strategy_id: int) -> dict:
+    """Restore an archived strategy to the active catalogue."""
+    with session_scope() as session:
+        strategy = session.get(TradingStrategy, strategy_id)
+        if not strategy:
+            raise NotFoundError(f"Strategy {strategy_id} not found")
+        if strategy.status == "active":
+            return {"strategy": _strategy_view(strategy)}
+        if strategy.status != "archived":
+            raise ValidationError(f"Strategy {strategy_id} is {strategy.status} and cannot be restored")
+        # A slug collision means an active strategy already owns this name.
+        clash = (session.query(TradingStrategy)
+                 .filter(TradingStrategy.slug == strategy.slug, TradingStrategy.status == "active",
+                         TradingStrategy.id != strategy.id).first())
+        if clash:
+            raise ValidationError(f"An active strategy already uses the name “{strategy.name}” — rename it first")
+        strategy.status = "active"
+        return {"strategy": _strategy_view(strategy)}
+
+
+def list_archived_strategies() -> dict:
+    with session_scope() as session:
+        rows = (session.query(TradingStrategy).filter_by(status="archived", origin="user")
+                .order_by(TradingStrategy.name.asc()).all())
+        return {"strategies": [_strategy_view(row) for row in rows]}
 
 
 def _run_view(run: BacktestRun) -> dict:

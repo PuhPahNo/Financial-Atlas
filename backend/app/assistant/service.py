@@ -501,6 +501,7 @@ def _parse_rebalance_request(message: str) -> dict | None:
         r"(\d+(?:\.\d+)?)\s*%\s*(?:to|in|on|into)?\s*([^,;]+?)(?=\s+(?:and\s+)?\d+(?:\.\d+)?\s*%|[,;]|$)",
         flags=re.IGNORECASE,
     )
+    named_ids: set[int] = set()
     for match in pattern.finditer(message):
         weight = float(match.group(1))
         target_text = match.group(2).strip(" .\"“”")
@@ -511,13 +512,26 @@ def _parse_rebalance_request(message: str) -> dict | None:
                 "strategy_name": strategy["name"],
                 "weight": weight,
             })
+            named_ids.add(strategy["id"])
     if not allocations:
         return None
+    # Merge onto the account's CURRENT allocations so sleeves the user didn't mention
+    # are preserved — rebalance_account replaces the whole set, so an un-merged payload
+    # would silently liquidate everything else to cash.
+    kept = [
+        {"strategy_id": a["strategy_id"], "strategy_name": a.get("name", f"Strategy {a['strategy_id']}"),
+         "weight": a["weight"]}
+        for a in (account.get("allocations") or [])
+        if a["strategy_id"] not in named_ids
+    ]
+    merged = allocations + kept
     return {
         "name": f"Rebalance {account['name']}",
         "account_id": account["id"],
         "account_name": account["name"],
-        "allocations": allocations,
+        "allocations": merged,
+        "changed_names": [a["strategy_name"] for a in allocations],
+        "kept_names": [a["strategy_name"] for a in kept],
     }
 
 
@@ -726,7 +740,11 @@ def _action_details(action: str, payload: dict) -> str:
     if action == "rebalance_account":
         rows = payload.get("allocations", [])
         labels = [f"{row.get('weight')}% {row.get('strategy_name', row.get('strategy_id'))}" for row in rows]
-        return ", ".join(labels)
+        detail = "Target allocation → " + ", ".join(labels)
+        kept = payload.get("kept_names") or []
+        if kept:
+            detail += f" (keeping {', '.join(kept)} unchanged)"
+        return detail
     if action == "clone_strategy":
         return "The copy will be editable while the original model remains unchanged."
     if action == "assign_strategy_to_account":
