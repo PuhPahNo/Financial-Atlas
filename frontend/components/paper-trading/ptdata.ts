@@ -1,6 +1,5 @@
-// Paper Trading data helpers — category hues, deterministic series (for card
-// sparklines / builder projection), formatters, regime→date-range presets, and
-// the adapter that maps a real backend strategy onto the design's "model" shape.
+// Paper Trading data helpers — category hues, formatters, regime→date-range
+// presets, and the adapter from backend strategies to the UI model shape.
 
 interface Pt { t: number; v: number }
 export interface CatMeta { id: string; label: string; short: string; hue: string; blurb: string }
@@ -11,7 +10,7 @@ export interface Model {
   id: number; name: string; category: string; author: "You" | "Atlas"; tagline: string; methodology: string;
   stats: ModelStats; sincePct: number; equity: Pt[]; holdings: Holding[]; params: Param[]; favorite: boolean;
   parameters: Record<string, any>; raw: any; isRule: boolean;
-  backtested: boolean; metricState: "backtested" | "seeded_illustrative" | "custom_projection";
+  backtested: boolean;
   backtestWindow?: { start: string; end: string }; benchmark?: Pt[];
 }
 
@@ -48,25 +47,6 @@ export function catMeta(c: { id: string; label: string; description?: string }):
   return { id: c.id, label: c.label, short: CAT_SHORT[c.id] || c.label, hue: CAT_HUES[c.id] || "var(--accent)", blurb: c.description || "" };
 }
 
-// ---- deterministic RNG + series (ported) --------------------------------
-function rng(seed: number) {
-  let a = seed >>> 0;
-  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
-function gauss(r: () => number) { return (r() + r() + r() - 1.5) * 1.1; }
-function genSeries(seed: number, n: number, { start = 100, drift = 0.0004, vol = 0.012, crash = null as null | { at: number; len: number; depth: number; recover?: number } } = {}): Pt[] {
-  const r = rng(seed); const out: Pt[] = []; let v = start;
-  for (let i = 0; i < n; i++) {
-    let d = drift;
-    if (crash && i >= crash.at && i < crash.at + crash.len) d -= crash.depth / crash.len;
-    if (crash && i >= crash.at + crash.len) d += (crash.recover || 0) / Math.max(1, n - (crash.at + crash.len));
-    v = v * (1 + d + gauss(r) * vol);
-    out.push({ t: i, v: Math.max(v, 1) });
-  }
-  return out;
-}
-const seriesPct = (s: Pt[]) => (s.length ? (s[s.length - 1].v / s[0].v - 1) * 100 : 0);
-
 export const fmt = {
   usd: (n: number) => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
   usd0: (n: number) => "$" + Math.round(n).toLocaleString("en-US"),
@@ -74,8 +54,14 @@ export const fmt = {
   pct2: (n: number) => (n >= 0 ? "+" : "") + n.toFixed(2) + "%",
 };
 
-function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 function humanize(key: string) { return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
+
+export function holdingWeights(holdings: any[]): Holding[] {
+  return (holdings || []).map((holding) => ({
+    ticker: holding.ticker,
+    w: Math.round(Number(holding.weight || 0) * 1000) / 10,
+  }));
+}
 
 // ---- adapter: real backend strategy → design model ----------------------
 export function toModel(s: any): Model {
@@ -100,17 +86,12 @@ export function toModel(s: any): Model {
     benchmark = Array.isArray(bt.benchmark) && bt.benchmark.length > 1
       ? bt.benchmark.map((p: any, i: number) => ({ t: i, v: p.v, d: p.d })) : undefined;
   } else {
-    // No backtest yet — illustrative deterministic series from seed metrics.
-    // Metrics we don't actually have stay empty ("—") instead of being invented.
-    cagr = (m.backtested_return ?? m.cagr ?? 0) * (Math.abs(m.backtested_return ?? 0) <= 2 ? 100 : 1);
-    maxDD = (m.max_drawdown ?? 0) * (Math.abs(m.max_drawdown ?? 0) <= 2 ? 100 : 1);
-    winRate = (m.win_rate ?? 0) * (Math.abs(m.win_rate ?? 0) <= 1.5 ? 100 : 1);
-    const seed = hashStr(String(s.id) + s.name);
-    const drift = Math.max(-0.0006, (cagr / 100) / 252);
-    const vol = 0.006 + Math.min(Math.abs(maxDD), 40) * 0.0004;
-    equity = genSeries(seed, 120, { drift, vol });
-    trades = typeof m.trades === "number" ? m.trades : 0;
-    sharpe = typeof m.sharpe === "number" ? m.sharpe : null;
+    cagr = 0;
+    maxDD = 0;
+    winRate = 0;
+    trades = 0;
+    sharpe = null;
+    equity = [];
   }
   const rawParams = s.parameters || {};
   const isRule = !!rawParams.rules;
@@ -130,12 +111,10 @@ export function toModel(s: any): Model {
       .filter(([k]) => k !== "tickers")
       .map(([k, v]) => ({ key: k, label: humanize(k), value: typeof v === "number" && Math.abs(v) < 1 && /pct|threshold|margin|yield|risk|cost|limit|coverage/i.test(k) ? `${(v * 100).toFixed(0)}%` : v }));
   }
-  const tickers: string[] = rawParams.tickers || [];
-  const per = tickers.length ? Math.floor(82 / tickers.length) : 0;
-  const holdings: Holding[] = tickers.length
-    ? [...tickers.map((t) => ({ ticker: t, w: per })), { ticker: "Cash", w: Math.max(0, 100 - per * tickers.length) }]
-    : [{ ticker: "Cash", w: 100 }];
-  const sincePct = backtested ? +cagr.toFixed(1) : +seriesPct(equity).toFixed(1);
+  const holdings: Holding[] = backtested && Array.isArray(bt.holdings)
+    ? holdingWeights(bt.holdings)
+    : [];
+  const sincePct = backtested ? +cagr.toFixed(1) : 0;
   return {
     id: s.id, name: s.name, category: s.category, author: s.origin === "user" ? "You" : "Atlas",
     tagline: s.description || "", methodology: s.methodology || "",
@@ -143,21 +122,18 @@ export function toModel(s: any): Model {
     sincePct, equity, holdings, params,
     favorite: false, parameters: rawParams, raw: s, isRule,
     backtested,
-    metricState: backtested ? "backtested" : s.origin === "seeded" ? "seeded_illustrative" : "custom_projection",
     backtestWindow, benchmark,
   };
 }
 
 export function metricStateLabel(model: Model): string {
-  if (model.metricState === "backtested") return "Backtested";
-  if (model.metricState === "seeded_illustrative") return "Seeded estimate";
-  return "Not backtested";
+  return model.backtested ? "Backtested" : "Not backtested";
 }
 
 export function metricStateTip(model: Model): string {
-  if (model.metricState === "backtested") return "Generated by an Atlas backtest using the stored run window.";
-  if (model.metricState === "seeded_illustrative") return "Seeded Atlas catalogue metric, not a run from your workspace yet.";
-  return "No stored backtest yet — open the model or run it in the Lab to populate real metrics.";
+  return model.backtested
+    ? "Generated by an Atlas backtest using the stored run window."
+    : "No stored backtest yet — open the model or run it in the Lab to populate real metrics.";
 }
 
 // ---- signal / rule strategies -------------------------------------------

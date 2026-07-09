@@ -20,7 +20,7 @@ function MiniStat({ label, value, tone, tip, align }: { label: string; value: st
 function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }: {
   model: Model; cat: CatMeta; onOpen: (m: Model) => void; onEdit: (m: Model) => void; onDelete: (m: Model) => void; onToggleFav: (id: number) => void }) {
   const [hover, setHover] = useState(false);
-  const up = model.stats.cagr >= 0;
+  const up = !model.backtested || model.stats.cagr >= 0;
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onClick={() => onOpen(model)} className="card"
       role="button" tabIndex={0} aria-label={`Open ${model.name}`}
@@ -62,9 +62,9 @@ function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }: {
       <Sparkline series={model.equity} color={up ? "var(--pos)" : "var(--neg)"} height={36} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-        <MiniStat label="Return" value={fmt.pct(model.stats.cagr)} tone={up ? "pos" : "neg"} tip={STAT_TIPS.cagr} />
+        <MiniStat label="Return" value={model.backtested ? fmt.pct(model.stats.cagr) : "—"} tone={model.backtested ? (up ? "pos" : "neg") : undefined} tip={STAT_TIPS.cagr} />
         <MiniStat label="Sharpe" value={model.stats.sharpe != null ? model.stats.sharpe.toFixed(2) : "—"} tip={STAT_TIPS.sharpe} />
-        <MiniStat label="Max DD" value={model.stats.maxDD.toFixed(1) + "%"} tone="neg" tip={STAT_TIPS.maxDD} align="right" />
+        <MiniStat label="Max DD" value={model.backtested ? model.stats.maxDD.toFixed(1) + "%" : "—"} tone={model.backtested ? "neg" : undefined} tip={STAT_TIPS.maxDD} align="right" />
         <PtTip tip={metricStateTip(model)} align="right">
           <Pill tone={model.backtested ? "pos" : "accent"}>{model.backtested ? `Win ${model.stats.winRate.toFixed(0)}%` : metricStateLabel(model)}</Pill>
         </PtTip>

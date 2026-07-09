@@ -81,10 +81,32 @@ def _normalize_backtest_status(connection: Connection) -> None:
         ))
 
 
+def _remove_duplicated_headline_metrics(connection: Connection) -> None:
+    inspector = inspect(connection)
+    if "trading_strategies" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("trading_strategies")}
+    if "metrics_json" not in columns:
+        return
+
+    strategies = Table("trading_strategies", MetaData(), autoload_with=connection)
+    legacy_keys = {"backtested_return", "max_drawdown", "win_rate"}
+    for row in connection.execute(select(strategies.c.id, strategies.c.metrics_json)):
+        metrics = dict(row.metrics_json or {})
+        if "_backtest" not in metrics or not legacy_keys.intersection(metrics):
+            continue
+        for key in legacy_keys:
+            metrics.pop(key, None)
+        connection.execute(
+            strategies.update().where(strategies.c.id == row.id).values(metrics_json=metrics)
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     ("20260709_01_drop_empty_legacy_paper_tables", _drop_empty_legacy_paper_tables),
     ("20260709_02_drop_redundant_strategy_defaults", _drop_redundant_strategy_defaults),
     ("20260709_03_normalize_backtest_status", _normalize_backtest_status),
+    ("20260709_04_remove_duplicated_headline_metrics", _remove_duplicated_headline_metrics),
 )
 
 

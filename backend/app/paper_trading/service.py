@@ -670,6 +670,7 @@ def _store_headline(strategy_id: int, result: dict, start: date, end: date) -> N
         "metrics": metrics,
         "equity": _downsample(curve, "equity"),
         "benchmark": _downsample(curve, "benchmark_equity"),
+        "holdings": _json_dates(result.get("holdings") or []),
         "warnings": result.get("warnings", [])[:2],
     }
     with session_scope() as session:
@@ -678,13 +679,6 @@ def _store_headline(strategy_id: int, result: dict, start: date, end: date) -> N
             return
         merged = dict(strategy.metrics_json or {})
         merged["_backtest"] = headline
-        # also surface the headline returns at the top level for legacy readers
-        if metrics.get("total_return") is not None:
-            merged["backtested_return"] = round(metrics["total_return"], 4)
-        if metrics.get("max_drawdown") is not None:
-            merged["max_drawdown"] = round(metrics["max_drawdown"], 4)
-        if metrics.get("win_rate") is not None:
-            merged["win_rate"] = round(metrics["win_rate"], 4)
         strategy.metrics_json = merged
         session.flush()
 

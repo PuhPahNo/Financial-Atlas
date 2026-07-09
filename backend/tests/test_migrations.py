@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import JSON, Column, Integer, MetaData, Table, create_engine, inspect, text
+from sqlalchemy import JSON, Column, Integer, MetaData, Table, create_engine, inspect, select, text
 
 from app.migrations import MIGRATIONS, run_migrations
 
@@ -83,6 +83,40 @@ def test_migration_backfills_legacy_null_backtest_status(tmp_path):
             "SELECT status FROM backtest_runs WHERE id = 1"
         )).scalar_one()
     assert status == "completed"
+    engine.dispose()
+
+
+def test_migration_removes_only_metrics_duplicated_by_headline(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'headline-metrics.db'}")
+    metadata = MetaData()
+    strategies = Table(
+        "trading_strategies",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("metrics_json", JSON),
+    )
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(strategies.insert(), [
+            {
+                "id": 1,
+                "metrics_json": {
+                    "_backtest": {"metrics": {"total_return": 0.12}},
+                    "backtested_return": 0.12,
+                    "max_drawdown": -0.04,
+                    "win_rate": 0.6,
+                },
+            },
+            {"id": 2, "metrics_json": {"win_rate": 0.7}},
+        ])
+
+    run_migrations(engine)
+
+    with engine.connect() as connection:
+        rows = connection.execute(select(strategies.c.id, strategies.c.metrics_json)).all()
+    cleaned = dict(rows[0].metrics_json)
+    assert cleaned == {"_backtest": {"metrics": {"total_return": 0.12}}}
+    assert rows[1].metrics_json == {"win_rate": 0.7}
     engine.dispose()
 
 

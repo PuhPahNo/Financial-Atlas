@@ -145,6 +145,7 @@ def test_backtest_fixture_strategy_persists_trades_and_equity():
             "start_date": "2020-01-01",
             "end_date": "2020-01-05",
             "starting_cash": 1000,
+            "persist_headline": True,
         },
     )
     assert res.status_code == 200
@@ -152,6 +153,10 @@ def test_backtest_fixture_strategy_persists_trades_and_equity():
     assert run["metrics"]["total_return"] != 0
     assert run["trades"]
     assert run["equity_curve"]
+    stored = client.get(f"/api/v1/paper-trading/strategies/{strategy['id']}").json()["data"]["strategy"]
+    headline = stored["metrics"]["_backtest"]
+    assert headline["holdings"]
+    assert not {"backtested_return", "max_drawdown", "win_rate"}.intersection(stored["metrics"])
 
 
 def test_rule_based_backtest_enters_on_signal_and_takes_profit():

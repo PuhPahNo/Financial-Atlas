@@ -94,7 +94,7 @@ export default function PaperTradingPage() {
             start_date: w.start, end_date: w.end, starting_cash: 100000, benchmark: "SPY", persist_headline: true,
           });
           refresh();  // reflect each card as it finishes
-        } catch { /* leave illustrative on failure */ }
+        } catch { /* keep the card honestly unbacktested on failure */ }
       }
     };
     worker().then(() => refresh());
