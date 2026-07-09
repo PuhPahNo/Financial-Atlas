@@ -72,6 +72,42 @@ def _validate_allocations(session, allocations, *, allow_inactive_ids: set[int] 
         raise ValidationError(f"Allocations sum to {total:.0f}% — they cannot exceed 100% of capital")
 
 
+def _active_account(session, account_id: int) -> TraderAccount:
+    account = session.get(TraderAccount, account_id)
+    if not account or account.status != "active":
+        raise NotFoundError(f"Trader account {account_id} not found")
+    return account
+
+
+def _replace_allocations(session, account: TraderAccount, allocations) -> None:
+    for existing in list(account.allocations):
+        session.delete(existing)
+    session.flush()
+    for allocation in allocations:
+        if allocation.weight > 0:
+            session.add(AccountAllocation(
+                account_id=account.id,
+                strategy_id=allocation.strategy_id,
+                weight=allocation.weight,
+            ))
+    session.flush()
+    session.expire(account, ["allocations"])
+
+
+def _rebalance_context(session, account_id: int, allocations):
+    account = _active_account(session, account_id)
+    existing_ids = {allocation.strategy_id for allocation in account.allocations}
+    _validate_allocations(session, allocations, allow_inactive_ids=existing_ids)
+    strategy_ids = existing_ids | {allocation.strategy_id for allocation in allocations}
+    strategies = (
+        {strategy.id: strategy for strategy in session.query(TradingStrategy).filter(
+            TradingStrategy.id.in_(strategy_ids)
+        ).all()}
+        if strategy_ids else {}
+    )
+    return account, strategies
+
+
 def _rebalance_preview(account: TraderAccount, allocations, strategies: dict[int, TradingStrategy]) -> dict:
     current = {a.strategy_id: float(a.weight) for a in account.allocations}
     target = {a.strategy_id: float(a.weight) for a in allocations if a.weight > 0}
@@ -127,9 +163,7 @@ def create_account(payload: AccountCreate) -> dict:
         )
         session.add(account)
         session.flush()
-        for a in payload.allocations:
-            if a.weight > 0:
-                session.add(AccountAllocation(account_id=account.id, strategy_id=a.strategy_id, weight=a.weight))
+        _replace_allocations(session, account, payload.allocations)
         session.flush()
         return {"account": _account_view(account, _strategies_map(session, account))}
 
@@ -146,18 +180,14 @@ def list_accounts() -> dict:
 
 def get_account(account_id: int) -> dict:
     with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
+        account = _active_account(session, account_id)
         return {"account": _account_view(account, _strategies_map(session, account))}
 
 
 def update_account(account_id: int, payload: AccountUpdate) -> dict:
     data = payload.model_dump(exclude_unset=True)
     with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
+        account = _active_account(session, account_id)
         if "name" in data and data["name"]:
             account.name = data["name"].strip()
         for field in ("emoji", "bio", "starting_cash"):
@@ -166,12 +196,7 @@ def update_account(account_id: int, payload: AccountUpdate) -> dict:
         if "allocations" in data and data["allocations"] is not None:
             existing_ids = {a.strategy_id for a in account.allocations}
             _validate_allocations(session, payload.allocations, allow_inactive_ids=existing_ids)
-            for existing in list(account.allocations):
-                session.delete(existing)
-            session.flush()
-            for a in payload.allocations:
-                if a.weight > 0:
-                    session.add(AccountAllocation(account_id=account.id, strategy_id=a.strategy_id, weight=a.weight))
+            _replace_allocations(session, account, payload.allocations)
         session.flush()
         session.refresh(account)
         return {"account": _account_view(account, _strategies_map(session, account))}
@@ -179,32 +204,15 @@ def update_account(account_id: int, payload: AccountUpdate) -> dict:
 
 def rebalance_preview(account_id: int, payload: AccountRebalanceRequest) -> dict:
     with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
-        existing_ids = {a.strategy_id for a in account.allocations}
-        _validate_allocations(session, payload.allocations, allow_inactive_ids=existing_ids)
-        ids = set(existing_ids) | {a.strategy_id for a in payload.allocations}
-        strategies = {s.id: s for s in session.query(TradingStrategy).filter(TradingStrategy.id.in_(ids)).all()} if ids else {}
+        account, strategies = _rebalance_context(session, account_id, payload.allocations)
         return {"preview": _rebalance_preview(account, payload.allocations, strategies)}
 
 
 def rebalance_account(account_id: int, payload: AccountRebalanceRequest) -> dict:
     with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
-        existing_ids = {a.strategy_id for a in account.allocations}
-        _validate_allocations(session, payload.allocations, allow_inactive_ids=existing_ids)
-        ids = set(existing_ids) | {a.strategy_id for a in payload.allocations}
-        strategies = {s.id: s for s in session.query(TradingStrategy).filter(TradingStrategy.id.in_(ids)).all()} if ids else {}
+        account, strategies = _rebalance_context(session, account_id, payload.allocations)
         preview = _rebalance_preview(account, payload.allocations, strategies)
-        for existing in list(account.allocations):
-            session.delete(existing)
-        session.flush()
-        for a in payload.allocations:
-            if a.weight > 0:
-                session.add(AccountAllocation(account_id=account.id, strategy_id=a.strategy_id, weight=a.weight))
+        _replace_allocations(session, account, payload.allocations)
         session.flush()
         session.refresh(account)
         return {"account": _account_view(account, _strategies_map(session, account)), "preview": preview}
@@ -212,9 +220,7 @@ def rebalance_account(account_id: int, payload: AccountRebalanceRequest) -> dict
 
 def delete_account(account_id: int) -> dict:
     with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
+        account = _active_account(session, account_id)
         account.status = "archived"
     return {"deleted": account_id}
 
@@ -286,17 +292,34 @@ def _drawdown_curve(points: list[dict]) -> list[dict]:
     return out
 
 
+def _account_sleeves(account_id: int) -> tuple[float, list[tuple[int, float, dict]]]:
+    with session_scope() as session:
+        account = _active_account(session, account_id)
+        strategies = _strategies_map(session, account)
+        starting_cash = float(account.starting_cash)
+        sleeves = [
+            (allocation.strategy_id, float(allocation.weight), _strategy_view(strategies[allocation.strategy_id]))
+            for allocation in account.allocations
+            if allocation.strategy_id in strategies and allocation.weight > 0
+        ]
+    return starting_cash, sleeves
+
+
+def _execute_sleeve(view: dict, dollars: float, start: date, end: date) -> dict:
+    return execute_backtest(
+        strategy=view,
+        tickers=normalize_tickers(view.get("parameters", {}).get("tickers", [])),
+        start_date=start,
+        end_date=end,
+        starting_cash=dollars,
+        benchmark="SPY",
+    )
+
+
 def account_performance(account_id: int, start: date | None = None, end: date | None = None) -> dict:
     if start is None or end is None:
         start, end = _default_window()
-    with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
-        strategies = _strategies_map(session, account)
-        starting_cash = float(account.starting_cash)
-        allocs = [(a.strategy_id, a.weight, _strategy_view(strategies[a.strategy_id]))
-                  for a in account.allocations if a.strategy_id in strategies and a.weight > 0]
+    starting_cash, allocs = _account_sleeves(account_id)
 
     invested_dollars = sum(starting_cash * w / 100 for _, w, _ in allocs)
     cash_dollars = max(0.0, starting_cash - invested_dollars)
@@ -306,12 +329,8 @@ def account_performance(account_id: int, start: date | None = None, end: date | 
     all_dates: set[str] = set()
     for sid, weight, view in allocs:
         dollars = starting_cash * weight / 100
-        tickers = normalize_tickers(view.get("parameters", {}).get("tickers", []))
         try:
-            res = execute_backtest(
-                strategy=view, tickers=tickers, start_date=start, end_date=end,
-                starting_cash=dollars, benchmark="SPY",
-            )
+            res = _execute_sleeve(view, dollars, start, end)
         except Exception as exc:  # noqa: BLE001 — a single broken sleeve shouldn't kill the account
             warnings.append(f"{view['name']}: {exc}")
             continue
@@ -460,27 +479,16 @@ def _compute_holdings(account_id: int) -> dict:
     """Run each allocated sleeve's backtest once and aggregate the settled positions the
     account holds going into the next session, plus the baseline cash and EOD value."""
     start, end = _holdings_window()
-    with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
-        strategies = _strategies_map(session, account)
-        starting_cash = float(account.starting_cash)
-        allocs = [(a.weight, _strategy_view(strategies[a.strategy_id]))
-                  for a in account.allocations if a.strategy_id in strategies and a.weight > 0]
+    starting_cash, allocs = _account_sleeves(account_id)
 
-    invested_dollars = sum(starting_cash * w / 100 for w, _ in allocs)
+    invested_dollars = sum(starting_cash * weight / 100 for _, weight, _ in allocs)
     cash = max(0.0, starting_cash - invested_dollars)  # account-level uninvested cash
     holdings: list[dict] = []
     warnings: list[str] = []
-    for weight, view in allocs:
+    for _strategy_id, weight, view in allocs:
         dollars = starting_cash * weight / 100
-        tickers = normalize_tickers(view.get("parameters", {}).get("tickers", []))
         try:
-            res = execute_backtest(
-                strategy=view, tickers=tickers, start_date=start, end_date=end,
-                starting_cash=dollars, benchmark="SPY",
-            )
+            res = _execute_sleeve(view, dollars, start, end)
         except Exception as exc:  # noqa: BLE001 — one broken sleeve shouldn't sink the mark
             warnings.append(f"{view['name']}: {exc}")
             cash += dollars  # treat the unresolved sleeve as cash so totals still reconcile
@@ -513,9 +521,7 @@ def account_holdings(account_id: int) -> dict:
     last trading day, the allocation set, and starting cash, so the expensive backtests
     re-run at most ~once per trading day or whenever allocations change."""
     with session_scope() as session:
-        account = session.get(TraderAccount, account_id)
-        if not account or account.status != "active":
-            raise NotFoundError(f"Trader account {account_id} not found")
+        account = _active_account(session, account_id)
         sig = ";".join(
             f"{a.strategy_id}:{a.weight}" for a in sorted(account.allocations, key=lambda x: x.strategy_id)
         )
