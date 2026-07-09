@@ -410,10 +410,3 @@ SEED_STRATEGIES = [
         "caveats": [*COMMON_CAVEATS, _NO_SEEDED_METRICS],
     },
 ]
-
-
-def with_defaults(strategy: dict) -> dict:
-    out = dict(strategy)
-    out.setdefault("caveats", COMMON_CAVEATS)
-    out.setdefault("defaults", out.get("parameters", {}))
-    return out

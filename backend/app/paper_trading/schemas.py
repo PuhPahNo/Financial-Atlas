@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 Category = Literal[
@@ -24,7 +24,6 @@ class StrategyCreate(BaseModel):
     history: str = Field(default="", max_length=1200)
     methodology: str = Field(default="", max_length=1600)
     parameters: dict[str, Any] = Field(default_factory=dict)
-    defaults: dict[str, Any] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     caveats: list[str] = Field(default_factory=list)
 
@@ -36,7 +35,6 @@ class StrategyUpdate(BaseModel):
     history: str | None = Field(default=None, max_length=1200)
     methodology: str | None = Field(default=None, max_length=1600)
     parameters: dict[str, Any] | None = None
-    defaults: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
     caveats: list[str] | None = None
 
@@ -47,13 +45,14 @@ class StrategyValidationRequest(BaseModel):
 
 
 class _BacktestWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     start_date: date
     end_date: date
     starting_cash: float = Field(default=100000.0, gt=0)
     benchmark: str = "SPY"
     transaction_cost_bps: float = Field(default=5.0, ge=0, le=100)
     slippage_bps: float = Field(default=5.0, ge=0, le=100)
-    use_fixture_data: bool = False
 
 
 class BacktestRequest(_BacktestWindow):

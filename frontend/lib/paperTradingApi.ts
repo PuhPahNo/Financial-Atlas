@@ -64,7 +64,6 @@ export interface Strategy {
   history: string;
   methodology: string;
   parameters: Record<string, any>;
-  defaults: Record<string, any>;
   metrics: Record<string, number | string | null>;
   caveats: string[];
 }

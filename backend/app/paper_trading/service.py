@@ -17,7 +17,7 @@ from ..models.paper_trading import (
     TradingStrategy,
 )
 from .schemas import BacktestRequest, ParameterSweepRequest, StrategyCreate, StrategyUpdate, normalize_tickers
-from .seed_catalog import CATEGORIES, SEED_STRATEGIES, with_defaults
+from .seed_catalog import CATEGORIES, COMMON_CAVEATS, SEED_STRATEGIES
 from .validation import validate_or_raise, validate_strategy_config
 
 
@@ -47,7 +47,6 @@ def _strategy_view(strategy: TradingStrategy) -> dict:
         "history": strategy.history or "",
         "methodology": strategy.methodology or "",
         "parameters": strategy.parameters_json or {},
-        "defaults": strategy.defaults_json or {},
         "metrics": strategy.metrics_json or {},
         "caveats": strategy.caveats_json or [],
         "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
@@ -58,7 +57,7 @@ def _strategy_view(strategy: TradingStrategy) -> dict:
 def ensure_seeded() -> None:
     with session_scope() as session:
         for item in SEED_STRATEGIES:
-            seed = with_defaults(item)
+            seed = item
             slug = _slug(seed["name"])
             existing = session.query(TradingStrategy).filter_by(slug=slug).first()
             if existing:
@@ -71,8 +70,7 @@ def ensure_seeded() -> None:
                     existing.history = seed.get("history", "")
                     existing.methodology = seed.get("methodology", "")
                     existing.parameters_json = seed.get("parameters", {})
-                    existing.defaults_json = seed.get("defaults", {})
-                    existing.caveats_json = seed.get("caveats", [])
+                    existing.caveats_json = seed.get("caveats", COMMON_CAVEATS)
                 continue
             session.add(TradingStrategy(
                 category=seed["category"],
@@ -83,9 +81,8 @@ def ensure_seeded() -> None:
                 history=seed.get("history", ""),
                 methodology=seed.get("methodology", ""),
                 parameters_json=seed.get("parameters", {}),
-                defaults_json=seed.get("defaults", {}),
                 metrics_json=seed.get("metrics", {}),
-                caveats_json=seed.get("caveats", []),
+                caveats_json=seed.get("caveats", COMMON_CAVEATS),
             ))
 
 
@@ -129,7 +126,6 @@ def create_strategy(payload: StrategyCreate) -> dict:
             history=data["history"],
             methodology=data["methodology"],
             parameters_json=data["parameters"],
-            defaults_json=data["defaults"] or data["parameters"],
             metrics_json=data["metrics"],
             caveats_json=data["caveats"],
         )
@@ -163,7 +159,6 @@ def update_strategy(strategy_id: int, payload: StrategyUpdate) -> dict:
                 setattr(strategy, target, data[source])
         for source, target in [
             ("parameters", "parameters_json"),
-            ("defaults", "defaults_json"),
             ("metrics", "metrics_json"),
             ("caveats", "caveats_json"),
         ]:
@@ -188,7 +183,6 @@ def clone_strategy(strategy_id: int) -> dict:
             history=source.history,
             methodology=source.methodology,
             parameters_json=source.parameters_json or {},
-            defaults_json=source.defaults_json or {},
             # A clone has no runs of its own — inheriting the source's backtest
             # headline would show results this strategy never produced.
             metrics_json={},
@@ -264,7 +258,7 @@ def _run_view(run: BacktestRun) -> dict:
         "start_date": run.start_date.isoformat(),
         "end_date": run.end_date.isoformat(),
         "starting_cash": run.starting_cash,
-        "status": run.status or "completed",  # legacy rows predate the job queue
+        "status": run.status,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "inputs": inputs,
         "strategy_snapshot": inputs.get("strategy_snapshot"),
@@ -396,7 +390,6 @@ def run_backtest(payload: BacktestRequest, *, run_id: int | None = None) -> dict
         transaction_cost_bps=payload.transaction_cost_bps,
         slippage_bps=payload.slippage_bps,
         benchmark=payload.benchmark,
-        use_fixture_data=payload.use_fixture_data,
     )
     run_id = _persist_backtest_result(
         strategy_id=payload.strategy_id,
@@ -523,7 +516,7 @@ def list_backtests(*, strategy_id: int | None = None, limit: int = 20) -> dict:
             "name": run.name,
             "start_date": run.start_date.isoformat() if run.start_date else None,
             "end_date": run.end_date.isoformat() if run.end_date else None,
-            "status": run.status or "completed",
+            "status": run.status,
             "created_at": run.created_at.isoformat() if run.created_at else None,
             "metrics": run.metrics_json or {},
             "sweep": bool((run.inputs_json or {}).get("sweep")),
@@ -606,7 +599,6 @@ def run_parameter_sweep(payload: ParameterSweepRequest) -> dict:
             transaction_cost_bps=payload.transaction_cost_bps,
             slippage_bps=payload.slippage_bps,
             benchmark=payload.benchmark,
-            use_fixture_data=payload.use_fixture_data,
         )
         metrics = _sweep_metrics(result, payload.starting_cash)
         run_id = _persist_backtest_result(

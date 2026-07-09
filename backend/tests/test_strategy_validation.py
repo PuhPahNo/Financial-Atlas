@@ -117,10 +117,23 @@ def test_invalid_inline_strategy_fails_before_backtest_execution():
             "start_date": "2020-01-01",
             "end_date": "2020-01-05",
             "starting_cash": 10000,
-            "use_fixture_data": True,
         },
     )
     assert res.status_code == 400
     body = res.json()["error"]
     assert body["code"] == "INVALID_REQUEST"
     assert any(issue["code"] == "incompatible_family" for issue in body["issues"])
+
+
+def test_fixture_data_switch_is_not_exposed_by_backtest_api():
+    res = client.post(
+        "/api/v1/backtests",
+        json={
+            "strategy_id": 1,
+            "start_date": "2020-01-01",
+            "end_date": "2020-01-05",
+            "use_fixture_data": True,
+        },
+    )
+    assert res.status_code == 422
+    assert any(error["loc"][-1] == "use_fixture_data" for error in res.json()["detail"])

@@ -1,14 +1,27 @@
 from datetime import date
+from functools import partial
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.main import app
 from app.backtesting import engine
 from app.paper_trading import accounts as account_service
+from app.paper_trading import service as paper_service
 from app.providers.base import Quote
 from auth_helpers import authenticate
 
 client = authenticate(TestClient(app))
+
+
+@pytest.fixture(autouse=True)
+def fixture_service_backtests(monkeypatch):
+    """Keep HTTP contract tests deterministic without exposing fixtures in the API."""
+    monkeypatch.setattr(
+        paper_service,
+        "execute_backtest",
+        partial(engine.run_backtest, use_fixture_data=True),
+    )
 
 
 def test_seeded_categories_include_models():
@@ -85,7 +98,6 @@ def test_full_paper_trading_regression_create_save_backtest_assign_archive():
             "start_date": "2020-01-01",
             "end_date": "2020-01-05",
             "starting_cash": 10000,
-            "use_fixture_data": True,
         },
     )
     assert backtest.status_code == 200
@@ -133,7 +145,6 @@ def test_backtest_fixture_strategy_persists_trades_and_equity():
             "start_date": "2020-01-01",
             "end_date": "2020-01-05",
             "starting_cash": 1000,
-            "use_fixture_data": True,
         },
     )
     assert res.status_code == 200
@@ -172,7 +183,6 @@ def test_rule_based_backtest_enters_on_signal_and_takes_profit():
             "start_date": "2020-01-01",
             "end_date": "2020-01-05",
             "starting_cash": 10000,
-            "use_fixture_data": True,
         },
     )
     assert res.status_code == 200
@@ -205,7 +215,6 @@ def test_backtest_run_preserves_strategy_snapshot_after_model_edit():
             "start_date": "2020-01-01",
             "end_date": "2020-01-05",
             "starting_cash": 1000,
-            "use_fixture_data": True,
         },
     )
     assert run_res.status_code == 200
@@ -244,7 +253,6 @@ def test_parameter_sweep_persists_ranked_variant_runs():
             "start_date": "2020-01-01",
             "end_date": "2020-01-05",
             "starting_cash": 1000,
-            "use_fixture_data": True,
         },
     )
     assert res.status_code == 200

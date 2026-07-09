@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import JSON, Column, Integer, MetaData, Table, create_engine, inspect, text
 
 from app.migrations import MIGRATIONS, run_migrations
 
@@ -23,7 +23,66 @@ def test_migration_drops_empty_legacy_tables_once(tmp_path):
     assert not tables.intersection(LEGACY_TABLES)
     with engine.connect() as connection:
         revisions = connection.execute(text("SELECT revision FROM atlas_schema_migrations")).scalars().all()
-    assert revisions == [MIGRATIONS[0][0]]
+    assert revisions == [revision for revision, _upgrade in MIGRATIONS]
+    engine.dispose()
+
+
+def _strategy_schema(engine, *, parameters: dict, defaults: dict) -> None:
+    metadata = MetaData()
+    strategies = Table(
+        "trading_strategies",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("parameters_json", JSON),
+        Column("defaults_json", JSON),
+    )
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(strategies.insert().values(
+            id=1,
+            parameters_json=parameters,
+            defaults_json=defaults,
+        ))
+
+
+def test_migration_drops_strategy_defaults_only_when_redundant(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'strategy-defaults.db'}")
+    _strategy_schema(engine, parameters={"tickers": ["AAPL"]}, defaults={"tickers": ["AAPL"]})
+
+    run_migrations(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("trading_strategies")}
+    assert "defaults_json" not in columns
+    engine.dispose()
+
+
+def test_migration_refuses_to_drop_distinct_strategy_defaults(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'strategy-defaults-guard.db'}")
+    _strategy_schema(engine, parameters={"window": 20}, defaults={"window": 50})
+
+    with pytest.raises(RuntimeError, match="mismatched strategy ids: 1"):
+        run_migrations(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("trading_strategies")}
+    assert "defaults_json" in columns
+    engine.dispose()
+
+
+def test_migration_backfills_legacy_null_backtest_status(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'backtest-status.db'}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE backtest_runs (id INTEGER PRIMARY KEY, status VARCHAR)"
+        ))
+        connection.execute(text("INSERT INTO backtest_runs (id, status) VALUES (1, NULL)"))
+
+    run_migrations(engine)
+
+    with engine.connect() as connection:
+        status = connection.execute(text(
+            "SELECT status FROM backtest_runs WHERE id = 1"
+        )).scalar_one()
+    assert status == "completed"
     engine.dispose()
 
 

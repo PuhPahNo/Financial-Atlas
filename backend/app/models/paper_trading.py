@@ -21,7 +21,6 @@ class TradingStrategy(Base):
     history = Column(String)
     methodology = Column(String)
     parameters_json = Column(JSON, default=dict)
-    defaults_json = Column(JSON, default=dict)
     metrics_json = Column(JSON, default=dict)
     caveats_json = Column(JSON, default=list)
     created_at = Column(DateTime, default=_now)
@@ -38,8 +37,7 @@ class BacktestRun(Base):
     end_date = Column(Date)
     starting_cash = Column(Float)
     # Job lifecycle: queued → running → completed | failed | cancelled.
-    # NULL (legacy rows written before the async queue) means completed.
-    status = Column(String, default="completed")
+    status = Column(String, default="completed", nullable=False)
     inputs_json = Column(JSON, default=dict)
     metrics_json = Column(JSON, default=dict)
     warnings_json = Column(JSON, default=list)

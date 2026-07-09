@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 
-from sqlalchemy import Connection, Engine, inspect, text
+from sqlalchemy import Connection, Engine, MetaData, Table, inspect, select, text
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,53 @@ def _drop_empty_legacy_paper_tables(connection: Connection) -> None:
         connection.execute(text(f'DROP TABLE "{table}"'))
 
 
+def _drop_redundant_strategy_defaults(connection: Connection) -> None:
+    inspector = inspect(connection)
+    if "trading_strategies" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("trading_strategies")}
+    if "defaults_json" not in columns:
+        return
+
+    strategies = Table("trading_strategies", MetaData(), autoload_with=connection)
+    mismatched_ids = [
+        row.id
+        for row in connection.execute(select(
+            strategies.c.id,
+            strategies.c.parameters_json,
+            strategies.c.defaults_json,
+        ))
+        if (row.defaults_json or {}) != (row.parameters_json or {})
+    ]
+    if mismatched_ids:
+        sample = ", ".join(str(strategy_id) for strategy_id in mismatched_ids[:10])
+        raise RuntimeError(
+            "Refusing to drop non-redundant trading_strategies.defaults_json; "
+            f"mismatched strategy ids: {sample}"
+        )
+    connection.execute(text('ALTER TABLE "trading_strategies" DROP COLUMN "defaults_json"'))
+
+
+def _normalize_backtest_status(connection: Connection) -> None:
+    inspector = inspect(connection)
+    if "backtest_runs" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("backtest_runs")}
+    if "status" not in columns:
+        return
+    connection.execute(text(
+        'UPDATE "backtest_runs" SET "status" = \'completed\' WHERE "status" IS NULL'
+    ))
+    if connection.dialect.name == "postgresql":
+        connection.execute(text(
+            'ALTER TABLE "backtest_runs" ALTER COLUMN "status" SET NOT NULL'
+        ))
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     ("20260709_01_drop_empty_legacy_paper_tables", _drop_empty_legacy_paper_tables),
+    ("20260709_02_drop_redundant_strategy_defaults", _drop_redundant_strategy_defaults),
+    ("20260709_03_normalize_backtest_status", _normalize_backtest_status),
 )
 
 

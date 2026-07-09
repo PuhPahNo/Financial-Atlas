@@ -197,7 +197,7 @@ CREATE TABLE trading_strategies (
   category TEXT NOT NULL, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL,
   origin TEXT DEFAULT 'seeded', status TEXT DEFAULT 'active',
   description TEXT, history TEXT, methodology TEXT,
-  parameters_json JSON, defaults_json JSON, metrics_json JSON, caveats_json JSON,
+  parameters_json JSON, metrics_json JSON, caveats_json JSON,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

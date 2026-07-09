@@ -1,9 +1,22 @@
 """Async backtest job queue: enqueue → claim → execute → poll, dedupe, cancel,
 and the boot-time interrupted-job sweep. Uses fixture data — no network."""
 from datetime import date
+from functools import partial
 
+import pytest
+
+from app.backtesting import engine
 from app.paper_trading import service
 from app.paper_trading.schemas import BacktestRequest, StrategyCreate
+
+
+@pytest.fixture(autouse=True)
+def fixture_service_backtests(monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "execute_backtest",
+        partial(engine.run_backtest, use_fixture_data=True),
+    )
 
 
 def _rule_strategy() -> int:
@@ -25,7 +38,7 @@ def _rule_strategy() -> int:
 
 def _request(strategy_id: int, *, start=date(2024, 1, 2), end=date(2024, 6, 28)) -> BacktestRequest:
     return BacktestRequest(strategy_id=strategy_id, start_date=start, end_date=end,
-                           starting_cash=10000.0, use_fixture_data=True, queue=True)
+                           starting_cash=10000.0, queue=True)
 
 
 def test_queue_lifecycle_enqueue_dedupe_execute():
@@ -67,7 +80,6 @@ def test_queue_cancel_and_interrupted_sweep():
 
 
 def test_enqueue_fails_fast_on_bad_strategy():
-    import pytest
     from app.core.errors import NotFoundError
     with pytest.raises(NotFoundError):
         service.enqueue_backtest(_request(999999))
