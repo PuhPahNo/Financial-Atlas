@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     cache_dir: Path = BACKEND_ROOT / ".cache"
     cache_enabled: bool = True
     cache_max_mb: int = 512
+    # The Render disk is shared with the database and durable price files. Keep
+    # enough free space for those sources of truth even when the cache itself is
+    # below its nominal cap.
+    cache_min_free_mb: int = 128
 
     # Database (PRD 03). SQLite locally -> Postgres on Render via DATABASE_URL.
     database_url: str = f"sqlite:///{BACKEND_ROOT / 'atlas.db'}"

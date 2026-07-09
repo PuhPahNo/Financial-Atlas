@@ -83,7 +83,9 @@ Use a managed Postgres database plus one Docker web service:
 - Web service: `financial-atlas`, Docker runtime, Starter plan, repo root, Dockerfile `./Dockerfile`.
 - Required env: `DATABASE_URL`, `BACKEND_URL=http://127.0.0.1:8000`, `SEC_USER_AGENT`,
   `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SECRET`.
-- Recommended cache disk env: `CACHE_DIR=/var/data/cache`, `CACHE_MAX_MB=800`.
+- Recommended cache disk env: `CACHE_DIR=/var/data/cache`, `CACHE_MAX_MB=512`,
+  `CACHE_MIN_FREE_MB=128`. The free-space reserve protects the database and price
+  store that share the Render disk.
 - Optional env: `OPENAI_API_KEY`, `FMP_API_KEY`, `FINNHUB_API_KEY`, `FRED_API_KEY`, and other
   provider keys documented in `backend/.env.example`.
 

@@ -1,4 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
+import os
+import shutil
 import threading
 import time
 
@@ -11,6 +13,9 @@ from app.core import cache
 def isolated_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(cache.settings, "cache_dir", tmp_path)
     monkeypatch.setattr(cache.settings, "cache_enabled", True)
+    monkeypatch.setattr(cache.settings, "cache_max_mb", 512)
+    monkeypatch.setattr(cache.settings, "cache_min_free_mb", 0)
+    monkeypatch.setattr(cache, "_write_count", 0)
 
 
 def test_get_or_set_records_miss_then_hit_with_trace():
@@ -74,6 +79,55 @@ def test_put_swallows_disk_write_error(monkeypatch):
     cache.put("unit", "skiplist", {"dead": True})  # must not raise
 
 
+def test_first_write_prunes_cache_over_size_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache.settings, "cache_max_mb", 1)
+    oldest = tmp_path / "unit" / "oldest.json"
+    newest = tmp_path / "unit" / "newest.json"
+    oldest.parent.mkdir(parents=True)
+    oldest.write_bytes(b"x" * 700_000)
+    newest.write_bytes(b"x" * 700_000)
+    os.utime(oldest, (1, 1))
+    os.utime(newest, (2, 2))
+
+    cache.put("unit", "fresh", {"value": 1})
+
+    assert not oldest.exists()
+    assert newest.exists()
+    assert cache.peek("unit", "fresh", ttl_seconds=60) == {"value": 1}
+
+
+def test_prune_preserves_shared_disk_free_space(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache.settings, "cache_max_mb", 0)
+    monkeypatch.setattr(cache.settings, "cache_min_free_mb", 1)
+    entry = tmp_path / "unit" / "large.json"
+    entry.parent.mkdir(parents=True)
+    entry.write_bytes(b"x" * 1_200_000)
+    monkeypatch.setattr(shutil, "disk_usage", lambda _path: shutil._ntuple_diskusage(10_000_000, 10_000_000, 0))
+
+    cache.put("unit", "fresh", {"value": 1})
+
+    assert not entry.exists()
+    assert cache.peek("unit", "fresh", ttl_seconds=60) == {"value": 1}
+
+
+def test_write_prunes_and_retries_once_after_oserror(monkeypatch):
+    attempts = 0
+
+    def flaky_write(path, payload):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError(28, "No space left on device")
+        path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(cache, "_write_atomic", flaky_write)
+    monkeypatch.setattr(cache, "_maybe_prune", lambda *, force=False: 1 if force else 0)
+
+    cache.put("unit", "retry", {"value": 1})
+
+    assert attempts == 2
+
+
 def test_get_or_set_single_flight_deduplicates_concurrent_loaders():
     calls = 0
     lock = threading.Lock()
@@ -96,4 +150,3 @@ def test_get_or_set_single_flight_deduplicates_concurrent_loaders():
     assert {result.value["value"] for result in results} == {"shared"}
     assert sum(result.status == "miss" for result in results) == 1
     assert sum(result.status == "hit" for result in results) == 7
-

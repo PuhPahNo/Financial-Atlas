@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -109,21 +110,27 @@ def _read(path: Path) -> dict | None:
 _write_count = 0
 
 
-def _maybe_prune() -> None:
-    """Bound the on-disk cache so a persistent disk can't overflow (e.g. raw EDGAR
-    companyfacts piling up). When the cache dir exceeds ``cache_max_mb``, delete the
-    oldest files until back under 90% of the cap. Runs only every Nth write to stay cheap.
-    ``cache_max_mb=0`` disables the cap (default)."""
+def _maybe_prune(*, force: bool = False) -> int:
+    """Prune old cache entries before they can crowd out durable data.
+
+    The first write in each process checks the disk, followed by every 200th write.
+    ``force`` is used after a failed write so a full persistent disk gets one chance
+    to recover. The size cap and the shared-disk free-space reserve are independent:
+    ``cache_max_mb=0`` disables only the cache-size cap.
+    """
     global _write_count
-    cap_mb = getattr(settings, "cache_max_mb", 0) or 0
-    if cap_mb <= 0:
-        return
     _write_count += 1
-    if _write_count % 200 != 0:
-        return
+    if not force and _write_count != 1 and _write_count % 200 != 0:
+        return 0
+
+    cap_mb = max(0, getattr(settings, "cache_max_mb", 0) or 0)
+    min_free_mb = max(0, getattr(settings, "cache_min_free_mb", 0) or 0)
+    if cap_mb <= 0 and min_free_mb <= 0:
+        return 0
+
     root = settings.cache_dir
     try:
-        entries = []
+        entries: list[tuple[float, int, Path]] = []
         total = 0
         for p in root.rglob("*.json"):
             try:
@@ -132,27 +139,42 @@ def _maybe_prune() -> None:
                 continue
             entries.append((st.st_mtime, st.st_size, p))
             total += st.st_size
-        limit = cap_mb * 1024 * 1024
-        if total <= limit:
-            return
-        target = int(limit * 0.9)
+
+        target = total
+        if cap_mb > 0:
+            limit = cap_mb * 1024 * 1024
+            if total > limit:
+                target = min(target, int(limit * 0.9))
+
+        if min_free_mb > 0:
+            free = shutil.disk_usage(root).free
+            reserve = min_free_mb * 1024 * 1024
+            if free < reserve:
+                target = min(target, max(0, total - (reserve - free)))
+
+        if target >= total:
+            return 0
+
         entries.sort()  # oldest first
+        removed = 0
         for _mtime, size, p in entries:
             if total <= target:
                 break
             try:
                 p.unlink()
                 total -= size
+                removed += 1
             except OSError:
                 pass
+        if removed:
+            logger.info("pruned %d cache files to preserve disk headroom", removed)
+        return removed
     except Exception:  # noqa: BLE001 — pruning is best-effort, never break a write
-        pass
+        return 0
 
 
-def _write(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Unique temp file per write so concurrent writers to the same key don't
-    # collide on a shared .tmp (which caused FileNotFoundError on os.replace).
+def _write_atomic(path: Path, payload: dict) -> None:
+    """Write one cache record atomically."""
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -164,7 +186,20 @@ def _write(path: Path, payload: dict) -> None:
         except OSError:
             pass
         raise
+
+
+def _write(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     _maybe_prune()
+    try:
+        _write_atomic(path, payload)
+    except OSError:
+        # A process can start against an already-full persistent disk. Prune
+        # immediately and retry once; permission/read-only errors still bubble
+        # up to the existing best-effort cache fallback.
+        if not _maybe_prune(force=True):
+            raise
+        _write_atomic(path, payload)
 
 
 def peek(namespace: str, key: str, ttl_seconds: int) -> Any | None:
