@@ -10,6 +10,7 @@ from ..backtesting.engine import run_backtest as execute_backtest
 from ..backtesting.metrics import max_drawdown
 from ..core import cache, market_hours
 from ..core.errors import NotFoundError, ValidationError
+from ..core.matching import best_name_match
 from ..db import session_scope
 from ..models.paper_trading import AccountAllocation, TraderAccount, TradingStrategy
 from ..services import prices
@@ -115,26 +116,6 @@ def _rebalance_preview(account: TraderAccount, allocations, strategies: dict[int
         "target_reconciled_pct": round(target_invested + max(0.0, 100 - target_invested), 2),
         "orders": orders,
     }
-
-
-def _tokens(value: str) -> set[str]:
-    return {part for part in value.lower().replace("&", " ").split() if len(part) > 1}
-
-
-def _best_name_match(rows, name: str):
-    needle = " ".join(name.strip().lower().split())
-    if not needle:
-        return None
-    for row in rows:
-        if " ".join(row.name.lower().split()) == needle:
-            return row
-    wanted = _tokens(needle)
-    best, best_score = None, 0
-    for row in rows:
-        score = len(wanted & _tokens(row.name))
-        if score > best_score:
-            best, best_score = row, score
-    return best if best_score else None
 
 
 def create_account(payload: AccountCreate) -> dict:
@@ -244,12 +225,12 @@ def assign_strategy_to_account(*, account_name: str, strategy_name: str, weight:
         raise ValidationError("Allocation weight must be between 0 and 100")
     with session_scope() as session:
         accounts = session.query(TraderAccount).filter_by(status="active").all()
-        account = _best_name_match(accounts, account_name)
+        account = best_name_match(accounts, account_name)
         if account is None:
             raise NotFoundError(f"Trader account '{account_name}' not found")
 
         strategies = session.query(TradingStrategy).filter_by(status="active").all()
-        strategy = _best_name_match(strategies, strategy_name)
+        strategy = best_name_match(strategies, strategy_name)
         if strategy is None:
             raise NotFoundError(f"Strategy '{strategy_name}' not found")
 

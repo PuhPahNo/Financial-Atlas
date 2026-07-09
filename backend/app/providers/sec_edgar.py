@@ -373,7 +373,7 @@ def _entries_by_priority(facts: dict, tags: list[str]) -> list[tuple[int, list[d
     return out
 
 
-def _is_annual_flow(e: dict) -> bool:
+def _flow_duration_in(e: dict, minimum: int, maximum: int) -> bool:
     start, end = e.get("start"), e.get("end")
     if not start or not end:
         return False
@@ -381,18 +381,15 @@ def _is_annual_flow(e: dict) -> bool:
         days = (date.fromisoformat(end) - date.fromisoformat(start)).days
     except ValueError:
         return False
-    return 350 <= days <= 380
+    return minimum <= days <= maximum
+
+
+def _is_annual_flow(e: dict) -> bool:
+    return _flow_duration_in(e, 350, 380)
 
 
 def _is_quarter_flow(e: dict) -> bool:
-    start, end = e.get("start"), e.get("end")
-    if not start or not end:
-        return False
-    try:
-        days = (date.fromisoformat(end) - date.fromisoformat(start)).days
-    except ValueError:
-        return False
-    return 80 <= days <= 100
+    return _flow_duration_in(e, 80, 100)
 
 
 def _period_key(e: dict, period: Period) -> tuple[int, str] | None:

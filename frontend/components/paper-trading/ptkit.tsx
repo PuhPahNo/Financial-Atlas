@@ -132,6 +132,62 @@ export function TextInput({ value, onChange, onBlur, placeholder, mono, style }:
   );
 }
 
+export function SelectInput({ value, onChange, options }: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div style={{ position: "relative" }}>
+      <select value={value} onChange={(event) => onChange(event.target.value)} style={{ width: "100%", appearance: "none", WebkitAppearance: "none", cursor: "pointer",
+        padding: "11px 38px 11px 14px", background: "var(--surface-2)", color: "var(--text-1)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", fontSize: 14, fontFamily: "var(--font-sans)", outline: "none" }}>
+        {options.map((option) => <option key={option.value} value={option.value} style={{ background: "#16161e" }}>{option.label}</option>)}
+      </select>
+      <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-3)" }}>
+        <Icon name="chevronDown" size={15} />
+      </span>
+    </div>
+  );
+}
+
+export function CategoryPicker({ categories, value, onChange }: {
+  categories: { id: string; short: string; hue: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {categories.map((category) => {
+        const selected = category.id === value;
+        return (
+          <button key={category.id} onClick={() => onChange(category.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 13px", cursor: "pointer",
+            fontSize: 12.5, fontWeight: 600, fontFamily: "var(--font-sans)", borderRadius: "var(--r-pill)", color: selected ? "var(--text-1)" : "var(--text-2)",
+            background: selected ? "var(--surface-3)" : "var(--surface-2)", border: `1px solid ${selected ? "var(--border-strong)" : "var(--border)"}` }}>
+            <CatDot hue={category.hue} />{category.short}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function MetricTile({ label, value, tone, big, subtle = false }: {
+  label: string;
+  value: string | number;
+  tone?: "pos" | "neg";
+  big?: boolean;
+  subtle?: boolean;
+}) {
+  return (
+    <div className="card" style={subtle
+      ? { padding: "12px 14px", background: "var(--surface-2)", borderRadius: "var(--r-md)" }
+      : { padding: "14px 16px" }}>
+      <div className="eyebrow" style={{ marginBottom: subtle ? 6 : 7 }}>{label}</div>
+      <div className="mono" style={{ fontSize: big ? 24 : subtle ? 17 : 18, fontWeight: 600, color: tone === "pos" ? "var(--pos)" : tone === "neg" ? "var(--neg)" : "var(--text-1)" }}>{value}</div>
+    </div>
+  );
+}
+
 function Backdrop({ onClose, children, align = "flex-end" }: { onClose: () => void; children: ReactNode; align?: string }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();

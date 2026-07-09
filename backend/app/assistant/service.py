@@ -10,6 +10,7 @@ import httpx
 
 from ..core.config import settings
 from ..core.errors import NotFoundError, ValidationError
+from ..core.matching import best_name_match
 from ..db import _now, session_scope
 from ..models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
 from ..paper_trading import accounts as account_service
@@ -433,28 +434,8 @@ def _parse_workflow_request(message: str) -> dict | None:
     return payload
 
 
-def _tokens(value: str) -> set[str]:
-    return {part for part in re.split(r"[^a-z0-9]+", value.lower()) if len(part) > 1}
-
-
-def _best_item_match(rows: list[dict], text: str) -> dict | None:
-    needle = " ".join(text.strip().lower().split())
-    if not needle:
-        return None
-    for row in rows:
-        if " ".join(str(row.get("name", "")).lower().split()) == needle:
-            return row
-    wanted = _tokens(needle)
-    best, best_score = None, 0
-    for row in rows:
-        score = len(wanted & _tokens(str(row.get("name", ""))))
-        if score > best_score:
-            best, best_score = row, score
-    return best if best_score else None
-
-
 def _resolve_account(message: str) -> dict | None:
-    return _best_item_match(account_service.list_accounts().get("accounts", []), message)
+    return best_name_match(account_service.list_accounts().get("accounts", []), message)
 
 
 def _parse_account_performance_request(message: str) -> dict | None:
@@ -502,7 +483,7 @@ def _parse_rebalance_request(message: str) -> dict | None:
     for match in pattern.finditer(message):
         weight = float(match.group(1))
         target_text = match.group(2).strip(" .\"“”")
-        strategy = _best_item_match(strategies, target_text)
+        strategy = best_name_match(strategies, target_text)
         if strategy:
             allocations.append({
                 "strategy_id": strategy["id"],

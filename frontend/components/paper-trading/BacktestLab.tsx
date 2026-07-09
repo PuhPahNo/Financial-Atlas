@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiErrorText, Integrity, ParameterSweep, paperTradingApi, RunSummary } from "@/lib/paperTradingApi";
-import { Btn, Icon, Segmented, TextInput } from "./ptkit";
+import { Btn, Icon, MetricTile, Segmented, SelectInput, TextInput } from "./ptkit";
 import { AreaChart, Donut, ReturnBars, drawdownOf, Pt } from "./ptcharts";
 import { fmt, REGIMES, Model } from "./ptdata";
 
@@ -15,27 +15,6 @@ interface Result {
   trades: any[]; holdings: { ticker: string; w: number }[]; warnings: string[];
 }
 interface NumericParam { path: string; label: string; value: number }
-
-function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
-  return (
-    <div style={{ position: "relative" }}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", appearance: "none", WebkitAppearance: "none", cursor: "pointer",
-        padding: "11px 38px 11px 14px", background: "var(--surface-2)", color: "var(--text-1)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", fontSize: 14, fontFamily: "var(--font-sans)", outline: "none" }}>
-        {options.map((o) => <option key={o.value} value={o.value} style={{ background: "#16161e" }}>{o.label}</option>)}
-      </select>
-      <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-3)" }}><Icon name="chevronDown" size={15} /></span>
-    </div>
-  );
-}
-
-function Tile({ label, value, tone, big }: { label: string; value: string; tone?: "pos" | "neg"; big?: boolean }) {
-  return (
-    <div className="card" style={{ padding: "14px 16px" }}>
-      <div className="eyebrow" style={{ marginBottom: 7 }}>{label}</div>
-      <div className="mono" style={{ fontSize: big ? 24 : 18, fontWeight: 600, color: tone === "pos" ? "var(--pos)" : tone === "neg" ? "var(--neg)" : "var(--text-1)" }}>{value}</div>
-    </div>
-  );
-}
 
 function Legend({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
   return (
@@ -300,7 +279,7 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
       <div className="card" style={{ padding: 20, display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
         <div style={{ flex: "1 1 240px" }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>Strategy</div>
-          <Select value={String(stratId)} onChange={(v) => setStratId(Number(v))} options={models.map((m) => ({ value: String(m.id), label: m.name }))} />
+          <SelectInput value={String(stratId)} onChange={(v) => setStratId(Number(v))} options={models.map((m) => ({ value: String(m.id), label: m.name }))} />
         </div>
         <div style={{ flex: "0 1 160px" }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>Starting capital</div>
@@ -332,7 +311,7 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
           <div style={{ flex: "1 1 240px" }}>
             <div className="eyebrow" style={{ marginBottom: 8 }}>Parameter sweep</div>
-            <Select value={sweepParam} onChange={(v) => {
+            <SelectInput value={sweepParam} onChange={(v) => {
               setSweepParam(v);
               setSweepValues(defaultSweepValues(sweepOptions.find((option) => option.path === v)?.value));
             }} options={sweepOptions.map((option) => ({ value: option.path, label: option.label }))} />
@@ -455,17 +434,17 @@ export default function BacktestLab({ models, preselectId, initialRegime }: { mo
           <IntegrityPanel integrity={result.integrity} />
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-            <Tile label="Total return" value={fmt.pct(result.stats.totalRet)} tone={up ? "pos" : "neg"} big />
-            <Tile label="vs S&P 500" value={fmt.pct(result.stats.alpha)} tone={beat ? "pos" : "neg"} big />
-            <Tile label="CAGR" value={fmt.pct(result.stats.cagr)} tone={result.stats.cagr >= 0 ? "pos" : "neg"} />
-            <Tile label="Max drawdown" value={result.stats.maxDD.toFixed(1) + "%"} tone="neg" />
-            {result.stats.winRate > 0 && <Tile label="Win rate" value={result.stats.winRate.toFixed(0) + "%"} />}
-            {result.metrics.sharpe != null && <Tile label="Sharpe" value={plainMetric(result.metrics.sharpe)} tone={result.metrics.sharpe >= 1 ? "pos" : undefined} />}
-            {result.metrics.sortino != null && <Tile label="Sortino" value={plainMetric(result.metrics.sortino)} />}
-            {result.metrics.volatility != null && <Tile label="Volatility (ann.)" value={(result.metrics.volatility * 100).toFixed(1) + "%"} />}
-            {result.metrics.calmar != null && <Tile label="Calmar" value={plainMetric(result.metrics.calmar)} />}
-            {result.metrics.beta != null && <Tile label="Beta" value={plainMetric(result.metrics.beta)} />}
-            {result.metrics.profit_factor != null && <Tile label="Profit factor" value={plainMetric(result.metrics.profit_factor)} />}
+            <MetricTile label="Total return" value={fmt.pct(result.stats.totalRet)} tone={up ? "pos" : "neg"} big />
+            <MetricTile label="vs S&P 500" value={fmt.pct(result.stats.alpha)} tone={beat ? "pos" : "neg"} big />
+            <MetricTile label="CAGR" value={fmt.pct(result.stats.cagr)} tone={result.stats.cagr >= 0 ? "pos" : "neg"} />
+            <MetricTile label="Max drawdown" value={result.stats.maxDD.toFixed(1) + "%"} tone="neg" />
+            {result.stats.winRate > 0 && <MetricTile label="Win rate" value={result.stats.winRate.toFixed(0) + "%"} />}
+            {result.metrics.sharpe != null && <MetricTile label="Sharpe" value={plainMetric(result.metrics.sharpe)} tone={result.metrics.sharpe >= 1 ? "pos" : undefined} />}
+            {result.metrics.sortino != null && <MetricTile label="Sortino" value={plainMetric(result.metrics.sortino)} />}
+            {result.metrics.volatility != null && <MetricTile label="Volatility (ann.)" value={(result.metrics.volatility * 100).toFixed(1) + "%"} />}
+            {result.metrics.calmar != null && <MetricTile label="Calmar" value={plainMetric(result.metrics.calmar)} />}
+            {result.metrics.beta != null && <MetricTile label="Beta" value={plainMetric(result.metrics.beta)} />}
+            {result.metrics.profit_factor != null && <MetricTile label="Profit factor" value={plainMetric(result.metrics.profit_factor)} />}
           </div>
 
           <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)", gap: 18 }}>

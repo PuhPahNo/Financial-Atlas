@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Btn, CatDot, Icon, Slider, TextInput } from "./ptkit";
+import { Btn, CategoryPicker, Icon, SelectInput, Slider, TextInput } from "./ptkit";
 import {
   CatMeta, Model, Rule, SIGNALS, REF_OPTIONS, blankRule, ruleSummary, ruleToPayload, rulesFromModel, validateRuleDraft,
 } from "./ptdata";
@@ -12,18 +12,6 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       <div className="eyebrow" style={{ marginBottom: 8 }}>{label}</div>
       {children}
       {hint && <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 6, lineHeight: 1.4 }}>{hint}</div>}
-    </div>
-  );
-}
-
-function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
-  return (
-    <div style={{ position: "relative" }}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", appearance: "none", WebkitAppearance: "none", cursor: "pointer",
-        padding: "11px 38px 11px 14px", background: "var(--surface-2)", color: "var(--text-1)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", fontSize: 14, fontFamily: "var(--font-sans)", outline: "none" }}>
-        {options.map((o) => <option key={o.value} value={o.value} style={{ background: "#16161e" }}>{o.label}</option>)}
-      </select>
-      <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-3)" }}><Icon name="chevronDown" size={15} /></span>
     </div>
   );
 }
@@ -58,18 +46,7 @@ export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
         <Field label="Model name"><TextInput value={name} onChange={setName} placeholder="e.g. S&P High Fade" /></Field>
 
         <Field label="Category">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {cats.map((c) => {
-              const on = c.id === category;
-              return (
-                <button key={c.id} onClick={() => setCategory(c.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 13px", cursor: "pointer",
-                  fontSize: 12.5, fontWeight: 600, fontFamily: "var(--font-sans)", borderRadius: "var(--r-pill)", color: on ? "var(--text-1)" : "var(--text-2)",
-                  background: on ? "var(--surface-3)" : "var(--surface-2)", border: `1px solid ${on ? "var(--border-strong)" : "var(--border)"}` }}>
-                  <CatDot hue={c.hue} />{c.short}
-                </button>
-              );
-            })}
-          </div>
+          <CategoryPicker categories={cats} value={category} onChange={setCategory} />
         </Field>
 
         <div style={{ height: 1, background: "var(--border)", margin: "4px 0 22px" }} />
@@ -94,7 +71,7 @@ export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
 
         {sigMeta.needsRef && (
           <Field label="Reference index" hint="The series the signal watches (you trade the instrument below, not this).">
-            <Select value={rule.reference} onChange={(v) => set("reference", v)} options={REF_OPTIONS} />
+            <SelectInput value={rule.reference} onChange={(v) => set("reference", v)} options={REF_OPTIONS} />
           </Field>
         )}
 

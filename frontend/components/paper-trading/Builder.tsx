@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Btn, CatDot, Icon, Slider, TextInput } from "./ptkit";
+import { Btn, CategoryPicker, Icon, Slider, TextInput } from "./ptkit";
 import { knobsToPayload, blankKnobs, parseTickers, CatMeta, Knobs, Model } from "./ptdata";
 import RuleBuilder from "./RuleBuilder";
 
@@ -81,18 +81,7 @@ export default function Builder({ seed, cats, onSave, onCancel }: {
         </div>
         <div style={{ marginBottom: 22 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Category</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {cats.map((c) => {
-              const on = c.id === category;
-              return (
-                <button key={c.id} onClick={() => setCategory(c.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 13px", cursor: "pointer",
-                  fontSize: 12.5, fontWeight: 600, fontFamily: "var(--font-sans)", borderRadius: "var(--r-pill)", color: on ? "var(--text-1)" : "var(--text-2)",
-                  background: on ? "var(--surface-3)" : "var(--surface-2)", border: `1px solid ${on ? "var(--border-strong)" : "var(--border)"}` }}>
-                  <CatDot hue={c.hue} />{c.short}
-                </button>
-              );
-            })}
-          </div>
+          <CategoryPicker categories={cats} value={category} onChange={setCategory} />
         </div>
 
         <div style={{ marginBottom: 22 }}>

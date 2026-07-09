@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from ..core.errors import NotFoundError
+from ..core.matching import best_name_match
 from ..paper_trading.schemas import StrategyCreate
 from ..paper_trading import accounts as account_service
 from ..paper_trading import service as paper_service
@@ -11,30 +12,11 @@ from ..services import company, financials, prices
 from ..valuation import service as valuation_service
 from ..providers.base import Period
 
-def _tokens(value: str) -> set[str]:
-    return {part for part in value.lower().replace("&", " ").split() if len(part) > 1}
-
-
-def _best_dict_match(rows: list[dict], name: str) -> dict | None:
-    needle = " ".join(str(name or "").strip().lower().split())
-    if not needle:
-        return None
-    for row in rows:
-        if " ".join(str(row.get("name", "")).lower().split()) == needle:
-            return row
-    wanted = _tokens(needle)
-    best, best_score = None, 0
-    for row in rows:
-        score = len(wanted & _tokens(str(row.get("name", ""))))
-        if score > best_score:
-            best, best_score = row, score
-    return best if best_score else None
-
 
 def _strategy_id(payload: dict) -> int:
     if payload.get("strategy_id"):
         return int(payload["strategy_id"])
-    match = _best_dict_match(paper_service.list_strategies().get("strategies", []), str(payload.get("strategy_name", "")))
+    match = best_name_match(paper_service.list_strategies().get("strategies", []), str(payload.get("strategy_name", "")))
     if not match:
         raise NotFoundError(f"Strategy '{payload.get('strategy_name', '')}' not found")
     return int(match["id"])
@@ -43,7 +25,7 @@ def _strategy_id(payload: dict) -> int:
 def _account_id(payload: dict) -> int:
     if payload.get("account_id"):
         return int(payload["account_id"])
-    match = _best_dict_match(account_service.list_accounts().get("accounts", []), str(payload.get("account_name", "")))
+    match = best_name_match(account_service.list_accounts().get("accounts", []), str(payload.get("account_name", "")))
     if not match:
         raise NotFoundError(f"Trader account '{payload.get('account_name', '')}' not found")
     return int(match["id"])

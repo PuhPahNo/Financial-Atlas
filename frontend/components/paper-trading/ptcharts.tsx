@@ -5,6 +5,17 @@ import { useRef, useState } from "react";
 // Lightweight responsive SVG charts (ported from the design's charts.jsx).
 export interface Pt { t: number; v: number; d?: string }
 
+export function equityChartPoints(points: { date: string; equity: number; benchmark_equity?: number | null }[]) {
+  return {
+    equity: points.map((point, index) => ({ t: index, v: point.equity, d: point.date })),
+    benchmark: points.map((point, index) => ({
+      t: index,
+      v: point.benchmark_equity ?? point.equity,
+      d: point.date,
+    })),
+  };
+}
+
 const VB = 1000;
 
 function buildPath(series: Pt[], h: number, pad: number) {

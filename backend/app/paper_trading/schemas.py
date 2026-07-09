@@ -46,10 +46,7 @@ class StrategyValidationRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
-class BacktestRequest(BaseModel):
-    strategy_id: int | None = None
-    strategy: StrategyCreate | None = None
-    tickers: list[str] = Field(default_factory=list)
+class _BacktestWindow(BaseModel):
     start_date: date
     end_date: date
     starting_cash: float = Field(default=100000.0, gt=0)
@@ -57,6 +54,12 @@ class BacktestRequest(BaseModel):
     transaction_cost_bps: float = Field(default=5.0, ge=0, le=100)
     slippage_bps: float = Field(default=5.0, ge=0, le=100)
     use_fixture_data: bool = False
+
+
+class BacktestRequest(_BacktestWindow):
+    strategy_id: int | None = None
+    strategy: StrategyCreate | None = None
+    tickers: list[str] = Field(default_factory=list)
     persist_headline: bool = False  # store a compact equity preview on the strategy
     # queue=True enqueues the run and returns immediately with status="queued";
     # poll GET /backtests/{id}. Long runs otherwise die at proxy timeouts
@@ -65,17 +68,10 @@ class BacktestRequest(BaseModel):
     assistant_context: dict[str, Any] = Field(default_factory=dict)
 
 
-class ParameterSweepRequest(BaseModel):
+class ParameterSweepRequest(_BacktestWindow):
     strategy_id: int
     parameter: str = Field(min_length=1, max_length=120)
     values: list[float] = Field(min_length=1, max_length=12)
-    start_date: date
-    end_date: date
-    starting_cash: float = Field(default=100000.0, gt=0)
-    benchmark: str = "SPY"
-    transaction_cost_bps: float = Field(default=5.0, ge=0, le=100)
-    slippage_bps: float = Field(default=5.0, ge=0, le=100)
-    use_fixture_data: bool = False
     rank_by: Literal["total_return", "sharpe", "max_drawdown", "win_rate", "turnover", "exposure"] = "total_return"
 
 

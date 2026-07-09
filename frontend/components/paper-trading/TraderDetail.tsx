@@ -3,18 +3,9 @@
 import { useEffect, useState } from "react";
 import { paperTradingApi, TraderAccount, AccountPerformance, AccountValue } from "@/lib/paperTradingApi";
 import { etTime, etDate } from "@/lib/datetime";
-import { Btn, IconBtn, Pill, CatDot, Icon } from "./ptkit";
-import { AreaChart, Pt } from "./ptcharts";
+import { Btn, IconBtn, Pill, CatDot, Icon, MetricTile } from "./ptkit";
+import { AreaChart, equityChartPoints, Pt } from "./ptcharts";
 import { CAT_HUES, fmt } from "./ptdata";
-
-function Tile({ label, value, tone }: { label: string; value: string; tone?: "pos" | "neg" }) {
-  return (
-    <div className="card" style={{ padding: "12px 14px", background: "var(--surface-2)", borderRadius: "var(--r-md)" }}>
-      <div className="eyebrow" style={{ marginBottom: 6 }}>{label}</div>
-      <div className="mono" style={{ fontSize: 17, fontWeight: 600, color: tone === "pos" ? "var(--pos)" : tone === "neg" ? "var(--neg)" : "var(--text-1)" }}>{value}</div>
-    </div>
-  );
-}
 
 export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
   account: TraderAccount | null; onClose: () => void; onEdit: (a: TraderAccount) => void; onDelete: (a: TraderAccount) => void }) {
@@ -69,8 +60,7 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
 
   const up = perf ? perf.total_return >= 0 : true;
   const beat = perf ? perf.alpha >= 0 : true;
-  const equity: Pt[] = perf ? perf.equity.map((p, i) => ({ t: i, v: p.equity, d: p.date })) : [];
-  const bench: Pt[] = perf ? perf.equity.map((p, i) => ({ t: i, v: p.benchmark_equity, d: p.date })) : [];
+  const { equity, benchmark: bench } = equityChartPoints(perf?.equity ?? []);
   const drawdown: Pt[] = perf?.drawdown_curve ? perf.drawdown_curve.map((p, i) => ({ t: i, v: p.drawdown * 100, d: p.date })) : [];
 
   return (
@@ -133,20 +123,20 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
             </div>
 
             <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-              <Tile label="Total return" value={fmt.pct(perf.total_return * 100)} tone={up ? "pos" : "neg"} />
-              <Tile label="vs S&P 500" value={fmt.pct(perf.alpha * 100)} tone={beat ? "pos" : "neg"} />
-              <Tile label="Max DD" value={(perf.max_drawdown * 100).toFixed(1) + "%"} tone="neg" />
-              <Tile label="Cash" value={fmt.usd0(perf.cash_dollars)} />
+              <MetricTile subtle label="Total return" value={fmt.pct(perf.total_return * 100)} tone={up ? "pos" : "neg"} />
+              <MetricTile subtle label="vs S&P 500" value={fmt.pct(perf.alpha * 100)} tone={beat ? "pos" : "neg"} />
+              <MetricTile subtle label="Max DD" value={(perf.max_drawdown * 100).toFixed(1) + "%"} tone="neg" />
+              <MetricTile subtle label="Cash" value={fmt.usd0(perf.cash_dollars)} />
             </div>
 
             {perf.risk && (
               <section>
                 <div className="eyebrow" style={{ marginBottom: 12 }}>Risk dashboard</div>
                 <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 12 }}>
-                  <Tile label="Exposure" value={(perf.risk.gross_exposure * 100).toFixed(0) + "%"} />
-                  <Tile label="Concentration" value={(perf.risk.concentration * 100).toFixed(0) + "%"} />
-                  <Tile label="Turnover" value={perf.risk.turnover.toFixed(2) + "x"} />
-                  <Tile label="HHI" value={perf.risk.herfindahl.toFixed(2)} />
+                  <MetricTile subtle label="Exposure" value={(perf.risk.gross_exposure * 100).toFixed(0) + "%"} />
+                  <MetricTile subtle label="Concentration" value={(perf.risk.concentration * 100).toFixed(0) + "%"} />
+                  <MetricTile subtle label="Turnover" value={perf.risk.turnover.toFixed(2) + "x"} />
+                  <MetricTile subtle label="HHI" value={perf.risk.herfindahl.toFixed(2)} />
                 </div>
                 {drawdown.length > 1 && (
                   <div className="card" style={{ padding: "12px 8px 2px", background: "var(--surface-2)", borderRadius: "var(--r-md)" }}>

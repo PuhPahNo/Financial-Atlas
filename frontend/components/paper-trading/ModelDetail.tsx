@@ -2,18 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { runBacktestAndWait } from "@/lib/paperTradingApi";
-import { Btn, CatDot, IconBtn } from "./ptkit";
-import { AreaChart, Donut, DONUT_PALETTE, drawdownOf, Pt } from "./ptcharts";
+import { Btn, CatDot, IconBtn, MetricTile } from "./ptkit";
+import { AreaChart, Donut, DONUT_PALETTE, drawdownOf, equityChartPoints, Pt } from "./ptcharts";
 import { fmt, CatMeta, Model, defaultBacktestWindow, metricStateLabel, metricStateTip } from "./ptdata";
-
-function StatBox({ label, value, tone }: { label: string; value: string | number; tone?: "pos" | "neg" }) {
-  return (
-    <div className="card" style={{ padding: "12px 14px", background: "var(--surface-2)", borderRadius: "var(--r-md)" }}>
-      <div className="eyebrow" style={{ marginBottom: 6 }}>{label}</div>
-      <div className="mono" style={{ fontSize: 17, fontWeight: 600, color: tone === "pos" ? "var(--pos)" : tone === "neg" ? "var(--neg)" : "var(--text-1)" }}>{value}</div>
-    </div>
-  );
-}
 
 interface Live { equity: Pt[]; benchmark?: Pt[]; cagr: number; maxDD: number; winRate: number; trades: number; sharpe: number | null; window: { start: string; end: string } }
 
@@ -41,8 +32,7 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
           start_date: w.start, end_date: w.end, starting_cash: 100000, benchmark: "SPY", persist_headline: true,
         }, { signal: abort.signal });
         const eq = run.equity_curve || [];
-        const equity: Pt[] = eq.map((p: any, i: number) => ({ t: i, v: p.equity, d: p.date }));
-        const benchmark: Pt[] = eq.map((p: any, i: number) => ({ t: i, v: p.benchmark_equity, d: p.date }));
+        const { equity, benchmark } = equityChartPoints(eq);
         const start = equity[0]?.v ?? 100000, final = equity[equity.length - 1]?.v ?? 100000;
         const mm: any = run.metrics || {};
         setLive({
@@ -115,12 +105,12 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
         </div>
 
         <div className="m-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-          <StatBox label="Return" value={fmt.pct(stats.cagr)} tone={stats.cagr >= 0 ? "pos" : "neg"} />
-          <StatBox label="Sharpe" value={stats.sharpe != null ? stats.sharpe.toFixed(2) : "—"} />
-          <StatBox label="Max DD" value={stats.maxDD.toFixed(1) + "%"} tone="neg" />
-          <StatBox label="Win rate" value={isLive ? stats.winRate.toFixed(0) + "%" : "—"} />
-          <StatBox label="Trades" value={isLive ? stats.trades : "—"} />
-          <StatBox label="Author" value={model.author} />
+          <MetricTile subtle label="Return" value={fmt.pct(stats.cagr)} tone={stats.cagr >= 0 ? "pos" : "neg"} />
+          <MetricTile subtle label="Sharpe" value={stats.sharpe != null ? stats.sharpe.toFixed(2) : "—"} />
+          <MetricTile subtle label="Max DD" value={stats.maxDD.toFixed(1) + "%"} tone="neg" />
+          <MetricTile subtle label="Win rate" value={isLive ? stats.winRate.toFixed(0) + "%" : "—"} />
+          <MetricTile subtle label="Trades" value={isLive ? stats.trades : "—"} />
+          <MetricTile subtle label="Author" value={model.author} />
         </div>
 
         <section>

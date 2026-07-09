@@ -22,8 +22,10 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string): Promise<Envelope<T>> {
-  const res = await fetch(`/api/v1${path}`, { headers: { Accept: "application/json" } });
+async function request<T>(path: string, init?: RequestInit): Promise<Envelope<T>> {
+  const headers = new Headers(init?.headers);
+  headers.set("Accept", "application/json");
+  const res = await fetch(`/api/v1${path}`, { ...init, headers });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = json?.error ?? {};
@@ -32,18 +34,16 @@ async function get<T>(path: string): Promise<Envelope<T>> {
   return json as Envelope<T>;
 }
 
+async function get<T>(path: string): Promise<Envelope<T>> {
+  return request<T>(path);
+}
+
 async function post<T>(path: string, body: unknown): Promise<Envelope<T>> {
-  const res = await fetch(`/api/v1${path}`, {
+  return request<T>(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = json?.error ?? {};
-    throw new ApiError(err.code ?? "INTERNAL", err.message ?? `Request failed (${res.status})`, err);
-  }
-  return json as Envelope<T>;
 }
 
 export const api = {
