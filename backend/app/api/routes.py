@@ -1,8 +1,6 @@
 """REST API routes (PRD 04). Thin layer: validate, call services, wrap envelope."""
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -17,26 +15,9 @@ from ..services import screener as screener_service
 from ..services import watchlists as watchlist_service
 from ..services import market as market_service
 from ..services import research as research_service
+from .responses import envelope
 
 router = APIRouter(prefix="/api/v1")
-
-
-def envelope(
-    data: Any,
-    *,
-    ticker: str | None = None,
-    served_by: str | None = None,
-    stale: bool = False,
-    as_of: str | None = None,
-    warnings: list[dict] | None = None,
-) -> dict:
-    meta = {"ticker": ticker, "served_by": served_by, "stale": stale}
-    if as_of is not None:
-        meta["as_of"] = as_of
-    if warnings:
-        meta["warnings"] = warnings
-    return {"data": data, "meta": meta}
-
 
 def _period(value: str) -> Period:
     return Period.QUARTER if value == "quarter" else Period.ANNUAL

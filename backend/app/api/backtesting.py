@@ -1,20 +1,14 @@
 """Backtesting API routes."""
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends
 
 from ..core.deps import require_paper_trading_access
 from ..paper_trading import service
 from ..paper_trading.schemas import BacktestRequest, ParameterSweepRequest
+from .responses import derived_envelope as envelope
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_paper_trading_access)])
-
-
-def envelope(data: Any, *, served_by: str | None = "derived") -> dict:
-    return {"data": data, "meta": {"ticker": None, "served_by": served_by, "stale": False}}
-
 
 @router.post("/backtests")
 def run_backtest(payload: BacktestRequest):

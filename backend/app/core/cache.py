@@ -222,38 +222,46 @@ def put(namespace: str, key: str, value: Any) -> None:
             logger.warning("cache put failed (%s): %s", type(exc).__name__, namespace)
 
 
+def _fresh_hit(record: dict, now: float) -> CacheResult:
+    stored_at = record.get("stored_at")
+    return CacheResult(
+        value=record["value"],
+        stale=False,
+        age_seconds=now - stored_at,
+        stored_at=stored_at,
+        status="hit",
+    )
+
+
+def _read_cached(
+    path: Path,
+    namespace: str,
+    key: str,
+    ttl_seconds: int,
+) -> tuple[CacheResult | None, dict | None, float]:
+    now = time.time()
+    record = _read(path) if settings.cache_enabled else None
+    if record is not None and now - record.get("stored_at", 0) <= ttl_seconds:
+        result = _fresh_hit(record, now)
+        _emit(namespace, key, result)
+        return result, record, now
+    return None, record, now
+
+
 def get_or_set(namespace: str, key: str, ttl_seconds: int, loader: Callable[[], Any]) -> CacheResult:
     """Return cached value if fresh, else call ``loader`` and cache it.
 
     On loader failure, fall back to a stale cached value when available.
     """
     path = _path_for(namespace, key)
-    now = time.time()
-    record = _read(path) if settings.cache_enabled else None
-    if record is not None and now - record.get("stored_at", 0) <= ttl_seconds:
-        result = CacheResult(
-            value=record["value"],
-            stale=False,
-            age_seconds=now - record.get("stored_at", 0),
-            stored_at=record.get("stored_at"),
-            status="hit",
-        )
-        _emit(namespace, key, result)
+    result, _record, _now = _read_cached(path, namespace, key, ttl_seconds)
+    if result is not None:
         return result
 
     # Single-flight: only one thread loads a given key; others wait then re-read.
     with _lock_for(f"{namespace}:{key}"):
-        now = time.time()
-        record = _read(path) if settings.cache_enabled else None
-        if record is not None and now - record.get("stored_at", 0) <= ttl_seconds:
-            result = CacheResult(
-                value=record["value"],
-                stale=False,
-                age_seconds=now - record.get("stored_at", 0),
-                stored_at=record.get("stored_at"),
-                status="hit",
-            )
-            _emit(namespace, key, result)
+        result, record, now = _read_cached(path, namespace, key, ttl_seconds)
+        if result is not None:
             return result
 
         try:

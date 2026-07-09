@@ -1,8 +1,6 @@
 """Paper trading API routes."""
 from __future__ import annotations
 
-from typing import Any
-
 from datetime import date
 
 from fastapi import APIRouter, Depends
@@ -17,13 +15,9 @@ from ..paper_trading.schemas import (
     StrategyUpdate,
     StrategyValidationRequest,
 )
+from .responses import derived_envelope as envelope
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_paper_trading_access)])
-
-
-def envelope(data: Any, *, served_by: str | None = "derived") -> dict:
-    return {"data": data, "meta": {"ticker": None, "served_by": served_by, "stale": False}}
-
 
 @router.get("/paper-trading/categories")
 def categories():

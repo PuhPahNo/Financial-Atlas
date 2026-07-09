@@ -120,7 +120,14 @@ def _request_url(resp: httpx.Response, fallback: str) -> str:
         return fallback
 
 
-def get_json(url: str, *, headers: dict | None = None, params: dict | None = None, provider: str = "") -> dict:
+def _retry_after_seconds(resp: httpx.Response) -> int:
+    try:
+        return int(resp.headers.get("Retry-After", 30))
+    except (TypeError, ValueError):
+        return 30
+
+
+def _get(url: str, *, headers: dict | None, params: dict | None, provider: str) -> httpx.Response:
     host = httpx.URL(url).host
     _LIMITS.get(host, _DEFAULT_LIMIT).acquire()
     try:
@@ -131,27 +138,25 @@ def get_json(url: str, *, headers: dict | None = None, params: dict | None = Non
     if resp.status_code == 404:
         raise NotFoundError(f"{provider or host} returned 404 for {_redact_url(_request_url(resp, url))}")
     if resp.status_code == 429:
-        raise RateLimitError(f"{provider or host} rate limited", retry_after_seconds=int(resp.headers.get("Retry-After", 30)))
+        raise RateLimitError(
+            f"{provider or host} rate limited",
+            retry_after_seconds=_retry_after_seconds(resp),
+        )
     if resp.status_code >= 400:
         raise ProviderError(f"{provider or host} returned {resp.status_code}")
+    return resp
+
+
+def get_json(url: str, *, headers: dict | None = None, params: dict | None = None, provider: str = "") -> dict:
+    resp = _get(url, headers=headers, params=params, provider=provider)
     try:
         return resp.json()
     except ValueError as exc:
-        raise ProviderError(f"{provider or host} returned non-JSON response") from exc
+        label = provider or httpx.URL(url).host
+        raise ProviderError(f"{label} returned non-JSON response") from exc
 
 
 def get_text(url: str, *, headers: dict | None = None, params: dict | None = None, provider: str = "") -> str:
     """Fetch raw text (e.g. Form 4 XML, Stooq CSV). Same rate limiting / error mapping as get_json."""
-    host = httpx.URL(url).host
-    _LIMITS.get(host, _DEFAULT_LIMIT).acquire()
-    try:
-        resp = _client.get(url, headers=headers, params=params)
-    except httpx.HTTPError as exc:
-        raise ProviderError(f"{provider or host} request failed: {type(exc).__name__}") from exc
-    if resp.status_code == 404:
-        raise NotFoundError(f"{provider or host} returned 404 for {_redact_url(_request_url(resp, url))}")
-    if resp.status_code == 429:
-        raise RateLimitError(f"{provider or host} rate limited")
-    if resp.status_code >= 400:
-        raise ProviderError(f"{provider or host} returned {resp.status_code}")
+    resp = _get(url, headers=headers, params=params, provider=provider)
     return resp.text
