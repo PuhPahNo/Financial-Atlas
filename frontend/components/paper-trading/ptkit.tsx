@@ -57,16 +57,6 @@ export function Pill({ tone = "neutral", children, style }: { tone?: Tone; child
   );
 }
 
-export function Stat({ label, value, sub, tone, mono = true }: { label: string; value: ReactNode; sub?: string; tone?: "pos" | "neg"; mono?: boolean }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div className="eyebrow">{label}</div>
-      <div className={mono ? "mono" : ""} style={{ fontSize: 21, fontWeight: 600, color: tone === "pos" ? "var(--pos)" : tone === "neg" ? "var(--neg)" : "var(--text-1)" }}>{value}</div>
-      {sub && <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>{sub}</div>}
-    </div>
-  );
-}
-
 export function Segmented<T extends string>({ options, value, onChange, size = "md" }: { options: { id: T; label: string }[]; value: T; onChange: (v: T) => void; size?: "sm" | "md" }) {
   const pad = size === "sm" ? "6px 12px" : "9px 16px";
   return (

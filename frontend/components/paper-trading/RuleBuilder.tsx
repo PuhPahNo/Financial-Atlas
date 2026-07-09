@@ -31,7 +31,7 @@ function Select({ value, onChange, options }: { value: string; onChange: (v: str
 export default function RuleBuilder({ seed, cats, onSave, onCancel }: {
   seed: Model | null; cats: CatMeta[]; onSave: (payload: any, editId: number | null) => void | Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState(seed?.name ?? "");
-  const [tagline, setTagline] = useState(seed && seed.isRule ? seed.tagline : "");
+  const tagline = seed && seed.isRule ? seed.tagline : "";
   const [category, setCategory] = useState(seed?.category ?? "risk_rotation");
   const [rule, setRule] = useState<Rule>(() => (seed ? rulesFromModel(seed) : null) ?? blankRule());
   const [saving, setSaving] = useState(false);

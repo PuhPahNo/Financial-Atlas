@@ -1,6 +1,6 @@
 // Insight engine (PRD: insights + tools). Pure functions that turn raw data into
 // ranked, human-readable callouts. Reused by every tab's <InsightStrip/>.
-import { money, pct, ratio } from "./format";
+import { money, pct } from "./format";
 
 export type Tone = "positive" | "negative" | "neutral";
 export interface Insight {

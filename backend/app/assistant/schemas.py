@@ -10,8 +10,3 @@ class SessionCreate(BaseModel):
 
 class MessageCreate(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
-
-
-class AssistantAction(BaseModel):
-    action: str
-    payload: dict

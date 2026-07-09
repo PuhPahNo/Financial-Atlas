@@ -22,7 +22,7 @@ function knobsFromModel(m: Model): Knobs {
 export default function Builder({ seed, cats, onSave, onCancel }: {
   seed: Model | null; cats: CatMeta[]; onSave: (payload: any, editId: number | null) => void | Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState(seed?.name ?? "");
-  const [tagline, setTagline] = useState(seed?.tagline ?? "");
+  const tagline = seed?.tagline ?? "";
   const [category, setCategory] = useState(seed?.category ?? cats[0]?.id ?? "long_term");
   const [knobs, setKnobs] = useState<Knobs>(() => (seed ? knobsFromModel(seed) : blankKnobs()));
   const [mode, setMode] = useState<"guided" | "rule">(seed?.isRule ? "rule" : "guided");

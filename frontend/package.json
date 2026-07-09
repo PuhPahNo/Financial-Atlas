@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "dupcheck": "jscpd app components lib ../backend/app --min-lines 6 --min-tokens 55 --reporters console --threshold 1.4 --ignore '**/.next/**,**/node_modules/**'",
+    "verify": "npm run lint && npm run typecheck && npm run dupcheck && npm run build"
   },
   "dependencies": {
     "lightweight-charts": "4.2.3",
@@ -16,10 +19,15 @@
     "recharts": "^2.15.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "3.3.3",
+    "@eslint/js": "9.39.4",
     "@types/node": "22.10.5",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",
     "autoprefixer": "10.4.20",
+    "eslint": "9.39.4",
+    "eslint-config-next": "15.5.19",
+    "jscpd": "5.0.12",
     "postcss": "8.5.10",
     "tailwindcss": "3.4.17",
     "typescript": "5.7.3"

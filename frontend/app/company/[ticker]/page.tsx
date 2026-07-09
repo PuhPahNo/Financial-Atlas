@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { money, price, pct, ratio, shares as fmtShares, signClass } from "@/lib/format";
 import { valuationInsight, growthInsight, fcfQualityInsight, healthInsight } from "@/lib/insights";
-import { Card, Panel, SourceBadge, StateView } from "@/components/ui";
+import { Panel, SourceBadge, StateView } from "@/components/ui";
 import InsightStrip from "@/components/InsightStrip";
 import AnalystSnapshot from "@/components/AnalystSnapshot";
 import NewsList from "@/components/NewsList";

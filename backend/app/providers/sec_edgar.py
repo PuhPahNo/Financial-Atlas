@@ -31,12 +31,6 @@ from .base import (
 
 # SEC Form 4 transaction codes (subset). P/S are open-market buys/sells.
 OPEN_MARKET_CODES = {"P", "S"}
-TRANSACTION_CODE_LABELS = {
-    "P": "Open-market buy", "S": "Open-market sell", "A": "Grant/award",
-    "M": "Option exercise", "F": "Tax withholding", "G": "Gift",
-    "C": "Conversion", "X": "Option exercise", "D": "Disposition to issuer",
-}
-
 _UA = {"User-Agent": settings.sec_user_agent}
 _TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 _FACTS_MEM: dict[str, dict] = {}  # in-memory parsed companyfacts (per-process)

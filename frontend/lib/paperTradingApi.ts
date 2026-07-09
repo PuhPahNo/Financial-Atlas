@@ -68,13 +68,6 @@ export interface Strategy {
   metrics: Record<string, number | string | null>;
   caveats: string[];
 }
-export interface StrategyValidation {
-  valid: boolean;
-  issues: { field: string; code: string; message: string }[];
-  warnings: { field?: string; code: string; message: string }[];
-  parameters: Record<string, any>;
-}
-
 export interface Category {
   id: string;
   label: string;
@@ -130,16 +123,6 @@ export interface ParameterSweep {
   runs: SweepRun[];
 }
 
-export interface Portfolio {
-  id: number;
-  strategy_id: number;
-  name: string;
-  cash: number;
-  status: string;
-  positions: any[];
-  orders: any[];
-}
-
 export interface Allocation {
   strategy_id: number; weight: number; name: string; category: string | null; dollars: number;
   strategy_status?: string; archived?: boolean;
@@ -174,36 +157,18 @@ export interface AccountValue {
   market_open: boolean; delayed_minutes: number; served_by: string; stale: boolean;
   warnings: string[];
 }
-export interface RebalanceOrder {
-  strategy_id: number; name: string; category: string | null; strategy_status: string; archived: boolean;
-  current_weight: number; target_weight: number; delta_weight: number;
-  current_dollars: number; target_dollars: number; trade_dollars: number; action: string;
-}
-export interface RebalancePreview {
-  account_id: number; starting_cash: number; current_invested_pct: number; target_invested_pct: number;
-  current_cash_pct: number; target_cash_pct: number; current_reconciled_pct: number; target_reconciled_pct: number;
-  orders: RebalanceOrder[];
-}
-
 export const paperTradingApi = {
   categories: () => request<{ categories: Category[] }>("/paper-trading/categories"),
-  strategies: () => request<{ strategies: Strategy[] }>("/paper-trading/strategies"),
   createStrategy: (payload: unknown) =>
     request<{ strategy: Strategy }>("/paper-trading/strategies", { method: "POST", body: body(payload) }),
-  validateStrategy: (payload: unknown) =>
-    request<StrategyValidation>("/paper-trading/strategies/validate", { method: "POST", body: body(payload) }),
   updateStrategy: (id: number, payload: unknown) =>
     request<{ strategy: Strategy }>(`/paper-trading/strategies/${id}`, { method: "PUT", body: body(payload) }),
-  cloneStrategy: (id: number) =>
-    request<{ strategy: Strategy }>(`/paper-trading/strategies/${id}/clone`, { method: "POST" }),
   deleteStrategy: (id: number) =>
     request<{ archived: number; in_use_by: string[] }>(`/paper-trading/strategies/${id}`, { method: "DELETE" }),
   listArchivedStrategies: () =>
     request<{ strategies: Strategy[] }>("/paper-trading/strategies-archived"),
   unarchiveStrategy: (id: number) =>
     request<{ strategy: Strategy }>(`/paper-trading/strategies/${id}/unarchive`, { method: "POST", body: body({}) }),
-  runBacktest: (payload: unknown) =>
-    request<{ run: BacktestRun; holdings: any[] }>("/backtests", { method: "POST", body: body(payload) }),
   queueBacktest: (payload: Record<string, unknown>) =>
     request<{ run: BacktestRun }>("/backtests", { method: "POST", body: body({ ...payload, queue: true }) }),
   getBacktest: (id: number) => request<{ run: BacktestRun }>(`/backtests/${id}`),
@@ -213,19 +178,11 @@ export const paperTradingApi = {
     request<{ run: BacktestRun }>(`/backtests/${id}/cancel`, { method: "POST", body: body({}) }),
   runSweep: (payload: unknown) =>
     request<{ sweep: ParameterSweep }>("/backtests/sweep", { method: "POST", body: body(payload) }),
-  createPortfolio: (payload: unknown) =>
-    request<{ portfolio: Portfolio }>("/paper-trading/portfolios", { method: "POST", body: body(payload) }),
-  runPortfolio: (id: number) =>
-    request<{ portfolio: Portfolio }>(`/paper-trading/portfolios/${id}/run`, { method: "POST", body: body({}) }),
   listAccounts: () => request<{ accounts: TraderAccount[] }>("/paper-trading/accounts"),
   createAccount: (payload: unknown) =>
     request<{ account: TraderAccount }>("/paper-trading/accounts", { method: "POST", body: body(payload) }),
   updateAccount: (id: number, payload: unknown) =>
     request<{ account: TraderAccount }>(`/paper-trading/accounts/${id}`, { method: "PUT", body: body(payload) }),
-  rebalancePreview: (id: number, payload: unknown) =>
-    request<{ preview: RebalancePreview }>(`/paper-trading/accounts/${id}/rebalance-preview`, { method: "POST", body: body(payload) }),
-  rebalanceAccount: (id: number, payload: unknown) =>
-    request<{ account: TraderAccount; preview: RebalancePreview }>(`/paper-trading/accounts/${id}/rebalance`, { method: "POST", body: body(payload) }),
   deleteAccount: (id: number) =>
     request<{ deleted: number }>(`/paper-trading/accounts/${id}`, { method: "DELETE" }),
   accountPerformance: (id: number, start?: string, end?: string) => {

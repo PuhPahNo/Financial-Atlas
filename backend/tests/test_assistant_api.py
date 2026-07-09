@@ -179,7 +179,7 @@ def test_assistant_clone_strategy_requires_confirmation_and_human_payload():
 
 def test_assistant_rebalance_account_requires_confirmation():
     first = _create_strategy("Assistant Rebalance A")
-    second = _create_strategy("Assistant Rebalance B")
+    _create_strategy("Assistant Rebalance B")
     _create_account("Assistant Rebalance Trader", [{"strategy_id": first["id"], "weight": 10}])
 
     session_id = client.post("/api/v1/assistant/sessions", json={"title": "Test Rebalance Chat"}).json()["data"]["session"]["id"]

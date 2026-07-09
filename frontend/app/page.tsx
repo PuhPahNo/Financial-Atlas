@@ -5,7 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { getRecents } from "@/lib/recents";
-import { money, price, pct, ratio, signClass } from "@/lib/format";
+import { price, pct, signClass } from "@/lib/format";
 import { Card, SectionTitle, StateView, Toggle } from "@/components/ui";
 import SearchBar from "@/components/SearchBar";
 import Sparkline from "@/components/charts/Sparkline";

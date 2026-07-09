@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Btn, CatDot, Icon, IconBtn, Empty } from "./ptkit";
+import { Btn, CatDot, IconBtn, Empty } from "./ptkit";
 import { CAT_HUES, fmt } from "./ptdata";
 import { TraderAccount } from "@/lib/paperTradingApi";
 

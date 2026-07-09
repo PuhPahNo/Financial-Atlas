@@ -18,6 +18,7 @@ function Tile({ label, value, tone }: { label: string; value: string; tone?: "po
 
 export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
   account: TraderAccount | null; onClose: () => void; onEdit: (a: TraderAccount) => void; onDelete: (a: TraderAccount) => void }) {
+  const accountId = account?.id;
   const [perf, setPerf] = useState<AccountPerformance | null>(null);
   const [value, setValue] = useState<AccountValue | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,35 +26,35 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
 
   useEffect(() => {
     setPerf(null); setError(null);
-    if (!account) return;
+    if (!accountId) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const res = await paperTradingApi.accountPerformance(account.id);
+        const res = await paperTradingApi.accountPerformance(accountId);
         if (!cancelled) setPerf(res.data);
       } catch (e: any) { if (!cancelled) setError(e.message || "Could not compute performance"); }
       finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [account?.id]);
+  }, [accountId]);
 
   // Live-ish value: fetch on mount, then poll ~60s while open (Yahoo is ~15-min delayed,
   // so faster is pointless). Independent of the heavy /performance fetch above.
   useEffect(() => {
     setValue(null);
-    if (!account) return;
+    if (!accountId) return;
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await paperTradingApi.accountValue(account.id);
+        const res = await paperTradingApi.accountValue(accountId);
         if (!cancelled) setValue(res.data);
       } catch { /* keep last value; the performance panel still renders */ }
     };
     load();
     const id = setInterval(load, 60000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [account?.id]);
+  }, [accountId]);
 
   if (!account) return null;
 

@@ -2,7 +2,6 @@
 
 import { ReactNode, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { signClass } from "@/lib/format";
 
 // --- containers ------------------------------------------------------------
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -42,25 +41,6 @@ export function SourceBadge({ servedBy, stale }: { servedBy?: string | null; sta
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: stale ? "#E0B341" : "#3ECF8E" }} />
       {stale ? "cached" : "live"} · {servedBy}
     </span>
-  );
-}
-
-/** Cell for a hairline `.metric-grid`. Label = uppercase muted; value = mono. */
-export function MetricCell({ label, value, hint, accent }: { label: string; value: ReactNode; hint?: string; accent?: boolean }) {
-  return (
-    <div className="px-5 py-4" title={hint}>
-      <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
-      <div className={`mt-2.5 font-mono text-2xl ${accent ? "text-accent-2" : "text-text"}`}>{value}</div>
-    </div>
-  );
-}
-
-export function StatChip({ label, value, sign }: { label: string; value: ReactNode; sign?: number | null }) {
-  return (
-    <div className="rounded-lg border border-line bg-surface/60 px-4 py-3">
-      <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
-      <div className={`mt-1.5 font-mono text-lg ${sign !== undefined ? signClass(sign) : "text-text"}`}>{value}</div>
-    </div>
   );
 }
 

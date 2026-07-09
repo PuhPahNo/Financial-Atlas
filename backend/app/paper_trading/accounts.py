@@ -4,7 +4,7 @@ allocated strategy's backtest over a shared window."""
 from __future__ import annotations
 
 import bisect
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from ..backtesting.engine import run_backtest as execute_backtest
 from ..backtesting.metrics import max_drawdown

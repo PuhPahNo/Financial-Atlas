@@ -174,15 +174,3 @@ def as_of_with_prior(ticker: str, D) -> tuple[dict | None, dict | None]:
     latest = max(eligible, key=lambda r: (r["fiscal_year"], r.get("filing_date") or ""))
     prior = next((r for r in eligible if r["fiscal_year"] == latest["fiscal_year"] - 1), None)
     return latest, prior
-
-
-def precompute_universe(tickers: list[str]) -> dict:
-    """Bulk-populate the table (e.g. from a warm job). as_of() does the extract+store."""
-    with_data = 0
-    for t in tickers:
-        try:
-            if as_of(t, date.today()) is not None:
-                with_data += 1
-        except Exception:  # noqa: BLE001
-            continue
-    return {"tickers": len(tickers), "with_data": with_data}

@@ -16,7 +16,7 @@ import pytest
 
 from app.core.rate_limit import reset_rate_limits
 from app.db import init_db, session_scope
-from app.db import CompanySnapshot, PitFundamental, Watchlist, WatchlistItem
+from app.db import CompanySnapshot, PitFundamental, Watchlist
 from app.models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
 from app.models.paper_trading import BacktestRun, PaperPortfolio, TraderAccount, TradingStrategy
 from app.models.valuation import ValuationResult

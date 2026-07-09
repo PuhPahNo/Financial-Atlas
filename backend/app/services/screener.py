@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from ..providers.base import Period
 from ..db import CompanySnapshot, WatchlistItem, session_scope
-from ..providers.registry import run_chain
 from . import company, financials, prices
 from ..valuation import service as valuation_service
 

@@ -95,7 +95,3 @@ class FmpProvider:
             volume=int(d["volume"]) if d.get("volume") is not None else None,
             market_cap=d.get("marketCap"),
         )
-
-    def get_ratios_ttm(self, ticker: str) -> dict:
-        rows = self._get("ratios-ttm", {"symbol": ticker.upper()}, ttl=86400, key=f"ratios:{ticker}")
-        return rows[0] if isinstance(rows, list) and rows else {}

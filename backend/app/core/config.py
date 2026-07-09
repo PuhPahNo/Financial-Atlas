@@ -69,7 +69,6 @@ class Settings(BaseSettings):
     auth_session_ttl_seconds: int = 7 * 24 * 60 * 60
     paper_trading_rate_limit_per_minute: int = 240
     assistant_rate_limit_per_minute: int = 20
-    auth_rate_limit_per_minute: int = 12
 
     # Live-ish paper trader valuation (PRD live-paper-valuation). The in-process refresh
     # tick pre-warms account marks during market hours; quotes are short-cached so reads

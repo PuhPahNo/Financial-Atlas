@@ -55,11 +55,6 @@ def _fetch_window(ticker: str, start: date, end: date) -> tuple[list[dict], str]
     return bars, served_by
 
 
-def _window(bars: list[dict], start: date, end: date) -> list[dict]:
-    s, e = start.isoformat(), end.isoformat()
-    return [b for b in bars if s <= str(b["date"]) <= e]
-
-
 # --------------------------------------------------------------------------- #
 # Rule parsing                                                                #
 # --------------------------------------------------------------------------- #
@@ -495,10 +490,3 @@ def run_backtest(
             transaction_cost_bps=transaction_cost_bps, slippage_bps=slippage_bps,
         ),
     }
-
-
-def next_business_day(day: date) -> date:
-    candidate = day + timedelta(days=1)
-    while candidate.weekday() >= 5:
-        candidate += timedelta(days=1)
-    return candidate

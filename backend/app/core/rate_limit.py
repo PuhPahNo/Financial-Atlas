@@ -48,10 +48,6 @@ def check_rate_limit(request: Request, *, group: str, limit: int, window_seconds
                 _buckets.pop(bucket_key, None)
 
 
-def rate_limit_auth(request: Request) -> None:
-    check_rate_limit(request, group="auth", limit=settings.auth_rate_limit_per_minute)
-
-
 def rate_limit_paper_trading(request: Request) -> None:
     check_rate_limit(request, group="paper-trading", limit=settings.paper_trading_rate_limit_per_minute)
 

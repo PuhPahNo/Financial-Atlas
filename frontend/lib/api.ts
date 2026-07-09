@@ -48,7 +48,6 @@ async function post<T>(path: string, body: unknown): Promise<Envelope<T>> {
 
 export const api = {
   search: (q: string) => get<{ ticker: string; name: string }[]>(`/search?q=${encodeURIComponent(q)}`),
-  company: (t: string) => get<any>(`/company/${t}`),
   companySnapshot: (t: string) => get<any>(`/company/${t}/snapshot`),
   prices: (t: string, range: string, interval: string) =>
     get<{ bars: any[]; currency: string }>(`/prices/${t}?range=${range}&interval=${interval}`),
@@ -62,14 +61,9 @@ export const api = {
   insiders: (t: string) => get<any>(`/ownership/${t}/insiders`),
   institutions: (t: string) => get<any>(`/ownership/${t}/institutions`),
   filings: (t: string, forms?: string) => get<any>(`/filings/${t}${forms ? `?forms=${forms}` : ""}`),
-  filingDocument: (url: string) => get<{ html: string; url: string }>(`/filings/document?url=${encodeURIComponent(url)}`),
   marketMovers: () => get<any>(`/market/movers`),
   marketContext: () => get<any>(`/market/context`),
   bestPicks: (limit = 8) => get<any>(`/market/best-picks?limit=${limit}`),
-  news: (t: string) => get<any>(`/news/${t}`),
-  analyst: (t: string) => get<any>(`/analyst/${t}`),
-  peers: (t: string) => get<any>(`/peers/${t}`),
-  compare: (tickers: string[]) => get<any>(`/compare?tickers=${tickers.join(",")}`),
   screenerUniverse: () => get<any>(`/screener/universe`),
   screenerIngest: (tickers: string[]) => post<any>(`/screener/ingest`, { tickers }),
   screenerSeed: () => post<any>(`/screener/seed`, {}),

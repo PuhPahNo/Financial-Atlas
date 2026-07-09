@@ -4,12 +4,12 @@ those from FMP instead.) Self-disables when no API key is configured.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from ..core.config import settings
 from ..core.http import get_json
 from ..core import cache
-from .base import AnalystSnapshot, Capability, NewsArticle, Peer, Quote
+from .base import Capability, NewsArticle, Quote
 
 _BASE = "https://finnhub.io/api/v1"
 

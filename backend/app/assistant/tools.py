@@ -12,31 +12,6 @@ from ..services import company, financials, prices
 from ..valuation import service as valuation_service
 from ..providers.base import Period
 
-READ_ONLY_TOOLS = {
-    "get_company_overview",
-    "get_cash_flow_analysis",
-    "get_valuation",
-    "get_price_history",
-    "list_strategies",
-    "list_accounts",
-    "get_account",
-    "account_performance",
-    "rebalance_preview",
-    "validate_strategy",
-    "run_backtest",
-}
-
-WRITE_TOOLS = {
-    "create_strategy",
-    "update_strategy",
-    "delete_strategy",
-    "clone_strategy",
-    "create_portfolio",
-    "assign_strategy_to_account",
-    "rebalance_account",
-}
-
-
 def _tokens(value: str) -> set[str]:
     return {part for part in value.lower().replace("&", " ").split() if len(part) > 1}
 

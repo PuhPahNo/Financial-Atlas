@@ -5,6 +5,7 @@ __pycache__/
 .cache/
 backend/.cache/
 backend/atlas.db
+.coverage
 *.db
 *.sqlite
 *.sqlite3

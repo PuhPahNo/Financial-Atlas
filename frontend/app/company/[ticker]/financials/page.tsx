@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { money, pct, price as fmtPrice, ratio, shares as fmtShares } from "@/lib/format";
+import { money, pct, price as fmtPrice, shares as fmtShares } from "@/lib/format";
 import { growthInsight, fcfQualityInsight, capitalReturnInsight } from "@/lib/insights";
 import { NoData, Panel, SourceBadge, StateView, Toggle } from "@/components/ui";
 import InsightStrip from "@/components/InsightStrip";

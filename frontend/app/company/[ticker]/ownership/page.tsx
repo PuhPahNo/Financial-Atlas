@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { money, shares as fmtShares, price as fmtPrice, signClass } from "@/lib/format";
 import { insiderInsight } from "@/lib/insights";
-import { Card, Panel, SourceBadge, StateView } from "@/components/ui";
+import { Panel, SourceBadge, StateView } from "@/components/ui";
 import InsightStrip from "@/components/InsightStrip";
 import Collapsible from "@/components/Collapsible";
 import InsiderTimeline from "@/components/charts/InsiderTimeline";

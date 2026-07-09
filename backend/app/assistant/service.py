@@ -968,11 +968,6 @@ def _run_backtest_response(message: str, *, assistant_context: dict | None = Non
     return content, call
 
 
-def _run_backtest_reply(message: str) -> str:
-    content, _ = _run_backtest_response(message)
-    return content
-
-
 def _first_ticker(message: str) -> str | None:
     ignored = {"FCF", "DCF", "AI", "API", "ETF", "SEC"}
     for token in re.findall(r"\b[A-Z]{1,5}\b", message):

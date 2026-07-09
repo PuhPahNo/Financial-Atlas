@@ -195,14 +195,6 @@ class Mover(BaseModel):
     change_pct: Optional[float] = None
 
 
-class MarketSeries(BaseModel):
-    symbol: str
-    label: str
-    price: Optional[float] = None
-    change_pct: Optional[float] = None
-    points: list[float] = []  # closing levels for a sparkline
-
-
 @runtime_checkable
 class Provider(Protocol):
     name: str

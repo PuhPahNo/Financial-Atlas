@@ -185,14 +185,6 @@ def warm(ticker: str, start: date, end: date) -> bool:
         return False
 
 
-def coverage(ticker: str) -> dict | None:
-    """{"start", "end", "bars"} for a stored ticker, or None."""
-    stored = _read(ticker.strip().upper())
-    if not stored:
-        return None
-    return {"start": stored["dates"][0], "end": stored["dates"][-1], "bars": len(stored["dates"])}
-
-
 def stored_tickers() -> list[str]:
     """Every ticker with a stored series, sorted."""
     with session_scope() as s:

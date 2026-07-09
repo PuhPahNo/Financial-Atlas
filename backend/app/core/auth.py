@@ -51,10 +51,6 @@ def verify_session_token(token: str | None) -> dict[str, Any] | None:
     return claims
 
 
-def validate_credentials(username: str, password: str) -> bool:
-    return hmac.compare_digest(username, settings.auth_username) and hmac.compare_digest(password, settings.auth_password)
-
-
 def require_auth(request: Request) -> dict[str, Any]:
     if not settings.auth_required:
         return {"sub": settings.auth_username, "auth_disabled": True}

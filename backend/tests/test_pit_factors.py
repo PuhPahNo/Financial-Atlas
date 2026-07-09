@@ -6,17 +6,16 @@ from app.backtesting import pit_fundamentals as pit
 from app.providers.base import CashFlowStatement
 
 
-def _bars(series):
-    return [{"date": d, "close": c} for d, c in series]
-
-
 def test_factors_ignore_data_after_D():
-    bars = _bars([("2020-01-01", 10), ("2020-01-02", 11), ("2020-01-03", 12), ("2020-01-04", 100)])
+    dates = ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"]
+    closes = [10, 11, 12, 100]
     D = date(2020, 1, 3)  # the 100 spike on the 4th must be invisible at D
-    assert factors.close_on(bars, D) == 12
-    assert factors.sma(bars, D, 3) == (10 + 11 + 12) / 3
-    assert factors.momentum(bars, D, 2) == 12 / 10 - 1
-    assert factors.new_high(bars, D, 2) is True
+    k = factors.idx_asof(dates, D)
+    assert k == 3
+    assert factors.close_at(dates, closes, D) == 12
+    assert factors.sma_at(closes, k, 3) == (10 + 11 + 12) / 3
+    assert factors.momentum_at(closes, k, 2) == 12 / 10 - 1
+    assert factors.high_proximity_at(closes, k, 3) == 1.0
 
 
 def test_as_of_respects_filing_dates(monkeypatch):
