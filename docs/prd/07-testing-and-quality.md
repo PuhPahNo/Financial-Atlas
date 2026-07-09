@@ -37,7 +37,7 @@ select fixture data. Engine tests may call that internal fixture mode directly.
 1. Ruff and ESLint with zero warnings.
 2. TypeScript `--noEmit` with unused locals/parameters enabled.
 3. The full pytest suite with a 68% aggregate coverage floor.
-4. jscpd with a 1.4% failure threshold (currently zero detected clones).
+4. jscpd with a zero-duplicate failure threshold.
 5. A Next.js production build.
 
 The gate is local and is also run before direct pushes to `main`. A hosted GitHub Actions workflow is

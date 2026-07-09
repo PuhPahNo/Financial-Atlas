@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "dupcheck": "jscpd app components lib ../backend/app --min-lines 6 --min-tokens 55 --reporters console --threshold 1.4 --ignore '**/.next/**,**/node_modules/**'",
+    "dupcheck": "jscpd app components lib ../backend/app --min-lines 6 --min-tokens 55 --reporters console --threshold 0 --ignore '**/.next/**,**/node_modules/**'",
     "verify": "npm run lint && npm run typecheck && npm run dupcheck && npm run build"
   },
   "dependencies": {
