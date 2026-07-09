@@ -17,7 +17,7 @@ function MiniStat({ label, value, tone, tip, align }: { label: string; value: st
   );
 }
 
-export function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }: {
+function ModelCard({ model, cat, onOpen, onEdit, onDelete, onToggleFav }: {
   model: Model; cat: CatMeta; onOpen: (m: Model) => void; onEdit: (m: Model) => void; onDelete: (m: Model) => void; onToggleFav: (id: number) => void }) {
   const [hover, setHover] = useState(false);
   const up = model.stats.cagr >= 0;

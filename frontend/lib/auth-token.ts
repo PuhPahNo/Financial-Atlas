@@ -2,9 +2,9 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || "atlas_session";
-export const AUTH_USERNAME = process.env.AUTH_USERNAME || "admin";
-export const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "admin123";
-export const AUTH_SECRET = process.env.AUTH_SECRET || "dev-atlas-auth-secret-change-me";
+const AUTH_USERNAME = process.env.AUTH_USERNAME || "admin";
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "admin123";
+const AUTH_SECRET = process.env.AUTH_SECRET || "dev-atlas-auth-secret-change-me";
 export const AUTH_TTL_SECONDS = Number(process.env.AUTH_SESSION_TTL_SECONDS || 7 * 24 * 60 * 60);
 
 /**

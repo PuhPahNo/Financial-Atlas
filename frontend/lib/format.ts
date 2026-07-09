@@ -1,6 +1,6 @@
 // Single source of number/date formatting (PRD 06 §8). `null` -> "—".
 
-export const DASH = "—";
+const DASH = "—";
 
 export function money(value: number | null | undefined, opts: { sign?: boolean } = {}): string {
   if (value === null || value === undefined || Number.isNaN(value)) return DASH;

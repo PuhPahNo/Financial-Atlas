@@ -90,7 +90,7 @@ GET  /api/v1/peers/{ticker}                  → peer set + median multiples (se
 POST /api/v1/screener                        → filter spec → matching tickers + metrics (see 20)
 GET  /api/v1/watchlists                      → lists; POST/PUT/DELETE for CRUD (see 21)
 GET  /api/v1/news/{ticker}                   → news + earnings/dividend calendar (see 19)
-GET  /api/v1/macro?series=DGS10,CPIAUCSL     → FRED series (see 19)
+PLANNED: GET /api/v1/macro?series=DGS10,CPIAUCSL → FRED series (see 19)
 ```
 
 ### Paper trading and backtesting

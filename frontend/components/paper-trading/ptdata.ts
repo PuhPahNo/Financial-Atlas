@@ -2,11 +2,11 @@
 // sparklines / builder projection), formatters, regime→date-range presets, and
 // the adapter that maps a real backend strategy onto the design's "model" shape.
 
-export interface Pt { t: number; v: number }
+interface Pt { t: number; v: number }
 export interface CatMeta { id: string; label: string; short: string; hue: string; blurb: string }
-export interface ModelStats { cagr: number; sharpe: number | null; maxDD: number; winRate: number; trades: number }
-export interface Holding { ticker: string; w: number }
-export interface Param { key: string; label: string; value: any; unit?: string }
+interface ModelStats { cagr: number; sharpe: number | null; maxDD: number; winRate: number; trades: number }
+interface Holding { ticker: string; w: number }
+interface Param { key: string; label: string; value: any; unit?: string }
 export interface Model {
   id: number; name: string; category: string; author: "You" | "Atlas"; tagline: string; methodology: string;
   stats: ModelStats; sincePct: number; equity: Pt[]; holdings: Holding[]; params: Param[]; favorite: boolean;
@@ -54,7 +54,7 @@ function rng(seed: number) {
   return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 function gauss(r: () => number) { return (r() + r() + r() - 1.5) * 1.1; }
-export function genSeries(seed: number, n: number, { start = 100, drift = 0.0004, vol = 0.012, crash = null as null | { at: number; len: number; depth: number; recover?: number } } = {}): Pt[] {
+function genSeries(seed: number, n: number, { start = 100, drift = 0.0004, vol = 0.012, crash = null as null | { at: number; len: number; depth: number; recover?: number } } = {}): Pt[] {
   const r = rng(seed); const out: Pt[] = []; let v = start;
   for (let i = 0; i < n; i++) {
     let d = drift;
@@ -65,7 +65,7 @@ export function genSeries(seed: number, n: number, { start = 100, drift = 0.0004
   }
   return out;
 }
-export const seriesPct = (s: Pt[]) => (s.length ? (s[s.length - 1].v / s[0].v - 1) * 100 : 0);
+const seriesPct = (s: Pt[]) => (s.length ? (s[s.length - 1].v / s[0].v - 1) * 100 : 0);
 
 export const fmt = {
   usd: (n: number) => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
@@ -161,12 +161,12 @@ export function metricStateTip(model: Model): string {
 }
 
 // ---- signal / rule strategies -------------------------------------------
-export const REF_LABEL: Record<string, string> = {
+const REF_LABEL: Record<string, string> = {
   "^GSPC": "S&P 500", "^IXIC": "Nasdaq", "^DJI": "Dow Jones", "^RUT": "Russell 2000",
 };
-export function refLabel(sym: string) { return REF_LABEL[sym] || sym; }
+function refLabel(sym: string) { return REF_LABEL[sym] || sym; }
 
-export function signalLabel(sig: any, instrument?: string): string {
+function signalLabel(sig: any, instrument?: string): string {
   const ref = refLabel(sig.reference || instrument || "");
   switch (sig.type) {
     case "new_high": return `${ref} new high`;

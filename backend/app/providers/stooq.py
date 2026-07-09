@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from ..core import cache
 from ..core.errors import ProviderError
 from ..core.http import get_text
-from .base import Capability, Interval, PriceBar, Quote
+from .base import Interval, PriceBar, Quote
 
 _HEADERS = {
     "User-Agent": (
@@ -73,7 +73,6 @@ def _parse_csv(text: str, sym: str) -> list[PriceBar]:
 
 class StooqProvider:
     name = "stooq"
-    capabilities = frozenset({Capability.PRICES})
 
     def _bars(self, sym: str, *, code: str, d1: str | None = None, d2: str | None = None) -> list[PriceBar]:
         params: dict[str, str] = {"s": sym, "i": code}

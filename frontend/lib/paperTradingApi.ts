@@ -74,7 +74,7 @@ export interface Category {
   strategies: Strategy[];
 }
 
-export interface IntegrityCheck {
+interface IntegrityCheck {
   id: string;
   label: string;
   status: "pass" | "warn" | "info";
@@ -105,7 +105,7 @@ export interface RunSummary {
   start_date: string | null; end_date: string | null; created_at: string | null;
   metrics: Record<string, number | null>; sweep: boolean;
 }
-export interface SweepRun {
+interface SweepRun {
   rank: number;
   run_id: number;
   parameter: string;
@@ -122,7 +122,7 @@ export interface ParameterSweep {
   runs: SweepRun[];
 }
 
-export interface Allocation {
+interface Allocation {
   strategy_id: number; weight: number; name: string; category: string | null; dollars: number;
   strategy_status?: string; archived?: boolean;
 }
@@ -130,14 +130,14 @@ export interface TraderAccount {
   id: number; name: string; emoji: string; bio: string; starting_cash: number; status: string;
   allocations: Allocation[]; invested_pct: number; cash_pct: number; reconciled_pct?: number; created_at: string;
 }
-export interface Contribution {
+interface Contribution {
   strategy_id: number; name: string; category: string | null; strategy_status?: string; archived?: boolean;
   weight: number; dollars: number; final: number; pnl: number; return_pct: number; turnover?: number;
 }
-export interface AccountRisk {
+interface AccountRisk {
   gross_exposure: number; cash_pct: number; concentration: number; herfindahl: number; turnover: number; max_drawdown: number;
 }
-export interface AccountAttribution {
+interface AccountAttribution {
   top_contributors: Contribution[]; laggards: Contribution[]; allocation: any[];
   reconciliation: { contribution_final: number; cash_dollars: number; current_value: number; difference: number };
 }

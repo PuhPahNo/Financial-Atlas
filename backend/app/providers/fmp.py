@@ -22,7 +22,6 @@ class FmpProvider:
 
     def __init__(self):
         self.key = settings.fmp_api_key
-        self.capabilities = frozenset()
 
     @property
     def enabled(self) -> bool:

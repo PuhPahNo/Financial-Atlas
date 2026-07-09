@@ -107,5 +107,3 @@ export function insiderInsight(summary: { net_value_90d?: number | null; cluster
     detail: summary.cluster_buy ? "Multiple insiders buying — a cluster-buy signal." : buying ? "Insiders are net buyers over the last 90 days." : "Insiders are net sellers over the last 90 days (often routine).",
   };
 }
-
-export { cagr, trend };

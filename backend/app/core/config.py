@@ -59,10 +59,7 @@ class Settings(BaseSettings):
     # RateLimitError so chains degrade to keyless providers instead of exhausting the key.
     # Kept under the hard cap to leave headroom for interactive use. 0 disables the guard.
     fmp_daily_budget: int = 180
-    alpha_vantage_api_key: str = ""
-    twelve_data_api_key: str = ""
     finnhub_api_key: str = ""
-    fred_api_key: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-5.5"
     auth_required: bool = True
@@ -97,10 +94,6 @@ class Settings(BaseSettings):
     # Safety backstop on how many tickers a single backtest scans (0 = unlimited). The engine
     # is memory-lean enough for the full universe on 512MB, but this caps a pathological run.
     backtest_universe_max: int = 0
-    # Reserved for the future paper-trading / backtesting phase (Alpaca).
-    alpaca_api_key: str = ""
-    alpaca_secret: str = ""
-
     @model_validator(mode="after")
     def _require_production_secrets(self) -> "Settings":
         """Fail closed: never serve production traffic on the committed dev AUTH_SECRET.

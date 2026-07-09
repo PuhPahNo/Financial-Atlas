@@ -1,19 +1,19 @@
-# 02 — Data Sources & Provider Interface
+# 02 — Data Sources & Provider Contracts
 
-> Parent: [00-master-prd.md](00-master-prd.md) · The reversibility backbone: every external source
-> sits behind one interface so no single source is load-bearing.
+> Parent: [00-master-prd.md](00-master-prd.md) · The reversibility backbone: external sources
+> normalize into common domain models and explicit fallback chains.
 
 ## 1. Purpose / why
 
-Catalog the **free** data sources, define the **pluggable provider interface** (so sources are
-swappable and testable), specify **fallback chains** per data domain, and document which **paid**
+Catalog the **free** data sources, define normalized provider contracts (so sources are swappable
+and testable), specify **fallback chains** per data domain, and document which **paid**
 APIs would add value with their **monthly cost** — for the user to approve case-by-case, never
 adopted silently.
 
 ## 2. User stories & acceptance criteria
 
-- *As the maintainer,* I can add a source by implementing one interface and registering it. **AC:**
-  no UI/service edits required beyond registration.
+- *As the maintainer,* I can add a source by implementing the relevant normalized methods and adding
+  it to a registry chain. **AC:** no UI edits are required.
 - *As a user,* a page still loads if the primary source is down or rate-limited. **AC:** fallback
   chain returns data from the next capable provider; the response notes which provider served it.
 - *As the user (owner),* I can see exactly what a paid upgrade would buy and cost. **AC:** the
@@ -21,50 +21,40 @@ adopted silently.
 
 ## 3. Scope (in / out)
 
-- **In:** provider contract, capability model, free source catalog, fallback policy, attribution,
+- **In:** provider contracts, domain chains, free source catalog, fallback policy, attribution,
   premium appendix.
 - **Out:** caching/rate-limit mechanics ([05](05-caching-and-jobs.md)), persistence ([03](03-data-model.md)).
 
-## 4. Provider interface (Design by Contract)
+## 4. Provider contracts (Design by Contract)
 
 A provider is an adapter for **one** source. It returns **normalized domain objects** (defined in
-[03](03-data-model.md)); it never returns raw JSON to services. Capabilities are explicit so the
-fallback engine knows what each provider can serve.
+[03](03-data-model.md)); it never returns raw upstream JSON to services. There is no speculative
+monolithic `ProviderProtocol` or capability enum. Each adapter implements only the methods it can
+serve, while `providers/registry.py` defines ordered chains per domain and invokes the requested
+method when present.
 
 ```python
-class Capability(str, Enum):
-    PROFILE = "profile"; PRICES = "prices"; INCOME = "income"
-    BALANCE = "balance"; CASHFLOW = "cashflow"; INSIDER = "insider"
-    INSTITUTIONAL = "institutional"; FILINGS = "filings"; NEWS = "news"; MACRO = "macro"
+CHAINS = {
+    "profile": [sec_edgar],
+    "prices": [yahoo, stooq],
+    "quote": [yahoo, fmp, stooq],
+    "income": [sec_edgar],
+    # ...
+}
 
-class ProviderProtocol(Protocol):
-    name: str
-    capabilities: frozenset[Capability]
-
-    def get_company_profile(self, ticker: str) -> CompanyProfile: ...
-    def get_price_history(self, ticker: str, *, start: date, end: date,
-                          interval: Interval) -> list[PriceBar]: ...
-    def get_income_statements(self, ticker: str, *, period: Period) -> list[IncomeStatement]: ...
-    def get_balance_sheets(self, ticker: str, *, period: Period) -> list[BalanceSheet]: ...
-    def get_cash_flows(self, ticker: str, *, period: Period) -> list[CashFlowStatement]: ...
-    def get_insider_transactions(self, ticker: str) -> list[InsiderTransaction]: ...
-    def get_institutional_holdings(self, ticker: str) -> list[InstitutionalHolding]: ...
-    def get_filings(self, ticker: str, *, forms: list[str]) -> list[Filing]: ...
+result, served_by = run_chain("prices", "get_price_history", ticker, ...)
 ```
 
-**Contract (applies to every method):**
+**Contract (applies to implemented methods):**
 - **Preconditions:** `ticker` is non-empty, upper-cased, resolvable to a CIK/identifier; date ranges
-  satisfy `start ≤ end`; the requested `Capability` is in `self.capabilities`.
+  satisfy `start ≤ end`.
 - **Postconditions:** returns a list (possibly empty) of **schema-valid** normalized objects sorted
   deterministically (prices by date asc; statements by fiscal period desc); monetary fields carry an
   explicit `currency`; never returns partially-populated raw dicts.
-- **Invariants:** the provider performs no caching and no DB writes (that is the service's job — keeps
-  providers orthogonal and unit-testable with recorded fixtures).
+- **Invariants:** adapters do not write application tables. Provider HTTP responses may use the
+  shared bounded cache so quotas and fallback behavior remain centralized.
 - **Errors:** raises `RateLimitError`, `NotFoundError`, or `ProviderError` (never returns `None`/`{}`
   to signal failure).
-
-Providers that lack a capability simply omit it from `capabilities`; calling an unsupported method
-raises `NotImplementedError` and the fallback engine skips them.
 
 ## 5. Free source catalog
 
@@ -76,12 +66,15 @@ raises `NotImplementedError` and the fallback engine skips them.
 | --- | --- | --- | --- | --- |
 | **SEC EDGAR** | filings, income/balance/cashflow (XBRL), insider (Form 4), institutional (13F/13D-G), profile (CIK/SIC) | ~10 req/s fair-use; no daily cap | None (descriptive `User-Agent` w/ contact email **required**) | **Primary source.** Authoritative, unlimited-ish, no key. Ticker→CIK via `company_tickers.json`. |
 | **FRED** (St. Louis Fed) | macro series (rates, CPI, GDP) | generous (~120 req/min) | Free API key | For macro context module. |
-| **Financial Modeling Prep** | profile, income/balance/cashflow, ratios | small daily cap (verify) | Free API key | Convenient pre-parsed fundamentals; cross-check vs EDGAR. |
+| **Financial Modeling Prep** | movers, quotes, peers, analyst price targets | small daily cap (verify) | Free API key | Optional enrichment; guarded by a daily budget. |
 | **Alpha Vantage** | prices (EOD/intraday), some fundamentals | ~25 req/day (verify) | Free API key | Very low cap → use sparingly, cache hard. |
 | **Twelve Data** | prices, quotes | ~800 req/day, ~8 req/min | Free API key | Good EOD/price workhorse within caps. |
-| **Finnhub** | quotes, profile, basic financials, earnings, some US insider tx | ~60 req/min | Free API key | Useful for quotes/earnings; insider coverage partial. |
+| **Finnhub** | quotes, company news, recommendations, peers | ~60 req/min | Free API key | Optional research enrichment. |
 | **Tiingo** | EOD prices, news | ~1k req/day, limited unique symbols/mo | Free API key | Clean EOD history + news. |
 | **Stooq** | EOD prices (CSV) | unmetered, best-effort | None | Keyless fallback for price history. |
+
+Implemented today: SEC EDGAR, Yahoo, Stooq, FMP (movers/quotes/peers/price targets), and Finnhub
+(quotes/news/recommendations/peers). The other rows are candidate sources, not installed adapters.
 
 **Unofficial (evaluate before use):** Yahoo Finance via `yfinance` is free and broad but ToS is a
 gray area and the endpoint is unstable. **Decision:** not part of the sanctioned backbone; may be
@@ -136,7 +129,8 @@ not the source of truth for financials.
 
 ## 11. Open questions & assumptions
 
-- Confirm which keyed free APIs we register first (assume EDGAR + Twelve Data + FRED + FMP for Phase 2).
+- Implemented adapters are SEC EDGAR, Yahoo, Stooq, FMP, and Finnhub. FRED, Alpha Vantage, and
+  Twelve Data remain future options and have no runtime configuration today.
 - Re-verify all free-tier limits at implementation time (they drift).
 
 ## 12. Done criteria

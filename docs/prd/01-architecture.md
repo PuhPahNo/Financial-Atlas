@@ -31,43 +31,27 @@ financial-atlas/
   docs/prd/                      # this PRD set
   backend/
     app/
-      api/                       # FastAPI routers (thin; no business logic)
-        company_routes.py
-        price_routes.py
-        financial_routes.py
-        valuation_routes.py
-        ownership_routes.py      # insider + institutional
-        filings_routes.py
-        screener_routes.py
-        watchlist_routes.py
+      api/                       # FastAPI routers and response envelopes
       services/                  # orchestration: fetch → cache → normalize → persist
-        company_service.py
-        price_service.py
-        financials_service.py
-        valuation_engine.py      # PURE functions, no I/O
-        ownership_service.py
-        filings_service.py
-        cache_service.py
-      providers/                 # external data adapters (implement ProviderProtocol)
-        base.py                  # ProviderProtocol + registry
-        sec_edgar/
-        fmp/
-        alpha_vantage/
-        twelve_data/
-        finnhub/
-        fred/
+      providers/                 # SEC, Yahoo, Stooq, FMP, and Finnhub adapters
+        base.py                  # normalized provider-domain models
+        registry.py              # explicit fallback chains
+      backtesting/               # rule and active-screen engines
+      valuation/                 # pure valuation engine + orchestration
+      paper_trading/             # strategy, backtest, and trader workflows
+      assistant/                 # session/action orchestration
       models/                    # ORM models + Pydantic schemas
       core/                      # config, logging, errors, rate-limit, db session
-      jobs/                      # background refresh jobs (see 05)
+      jobs/                      # directly runnable maintenance jobs (see 05)
     tests/                       # pytest (unit/contract/integration)
-    pyproject.toml
   frontend/
     app/                         # Next.js App Router pages
       company/[ticker]/
-      financials/[ticker]/
-      valuation/[ticker]/
+      paper-trading/
       screener/
       watchlists/
+    components/                  # shared product and chart components
+    lib/                         # API clients, formatting, auth helpers
     components/                  # StockChart, FinancialTable, ValuationSummary, ...
     lib/                         # api client, formatters, valuation display helpers
     package.json

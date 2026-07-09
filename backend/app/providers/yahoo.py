@@ -13,7 +13,7 @@ from ..core import http
 from ..core.config import settings
 from ..core.errors import NotFoundError, ProviderError, RateLimitError
 from ..core.http import get_json
-from .base import Capability, Interval, PriceBar, Quote
+from .base import Interval, PriceBar, Quote
 
 # A realistic browser User-Agent; Yahoo serves consent pages / 401s to bare/bot
 # agents. Paired with the cookie+crumb bootstrap in core.http.
@@ -31,7 +31,6 @@ _RANGE_MAP = {"1m": "1mo", "3m": "3mo", "6m": "6mo", "1y": "1y", "3y": "5y", "5y
 
 class YahooProvider:
     name = "yahoo"
-    capabilities = frozenset({Capability.PRICES})
 
     def _fetch(self, sym: str, params: dict) -> dict:
         """GET the chart endpoint with a crumb, failing over query1->query2 and

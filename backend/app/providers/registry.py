@@ -20,8 +20,7 @@ stooq = StooqProvider()      # keyless EOD fallback for when Yahoo is blocked/do
 finnhub = FinnhubProvider()  # keyed; self-disables without FINNHUB_API_KEY
 fmp = FmpProvider()          # keyed; self-disables without FMP_API_KEY
 
-# Ordered fallback chains per logical domain (PRD 02 §6). Extend as keyed
-# providers (FMP, Twelve Data, Finnhub) are registered.
+# Ordered fallback chains per logical domain (PRD 02 §6).
 CHAINS = {
     "profile": [sec_edgar],
     "income": [sec_edgar],

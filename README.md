@@ -69,9 +69,8 @@ cd frontend && npm run build
   13D/13G ownership data. Authoritative, free, no key.
 - **Yahoo Finance**: keyless EOD prices, quotes, and market data used by charts, valuation inputs,
   screeners, and simulated account marks.
-- **Optional keyed providers**: FMP, Finnhub, FRED, Alpha Vantage, Twelve Data, and OpenAI can be
-  enabled via environment variables. The app runs without those keys; unavailable providers
-  self-disable or return explicit warnings.
+- **Optional keyed providers**: FMP, Finnhub, and OpenAI can be enabled via environment variables.
+  The app runs without those keys; unavailable features self-disable or return explicit warnings.
 
 Data source details live in [docs/prd/02-data-sources.md](docs/prd/02-data-sources.md).
 
@@ -86,8 +85,7 @@ Use a managed Postgres database plus one Docker web service:
 - Recommended cache disk env: `CACHE_DIR=/var/data/cache`, `CACHE_MAX_MB=512`,
   `CACHE_MIN_FREE_MB=128`. The free-space reserve protects the database and price
   store that share the Render disk.
-- Optional env: `OPENAI_API_KEY`, `FMP_API_KEY`, `FINNHUB_API_KEY`, `FRED_API_KEY`, and other
-  provider keys documented in `backend/.env.example`.
+- Optional env: `OPENAI_API_KEY`, `FMP_API_KEY`, and `FINNHUB_API_KEY`.
 
 [infra/render.yaml](infra/render.yaml) documents the same settings for review, but manual provisioning
 is fine. See [docs/prd/30-deployment-render.md](docs/prd/30-deployment-render.md).
@@ -107,6 +105,6 @@ make verify  # lint + TypeScript + backend tests/coverage + duplicate scan + pro
 - **Institutional 13F holder-by-holder breakdown** is not reconstructed. It requires reverse-indexing
   every institution's 13F by CUSIP, which is heavy and unreliable on free tiers. Large/activist
   13D/13G stakes are shown.
-- **News, macro, and assistant features** depend on optional provider keys and degrade with warnings
-  when those providers are not configured.
+- **News, analyst, peer, and assistant features** depend partly on optional provider keys and
+  degrade with warnings when those providers are not configured.
 - Quarterly XBRL Q4 figures can be sparse (companies often report Q4 only inside the annual 10-K).

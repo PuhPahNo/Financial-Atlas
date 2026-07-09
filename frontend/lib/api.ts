@@ -1,6 +1,6 @@
 // API client (PRD 04). All requests go through the Next.js rewrite to the backend.
 
-export interface Meta {
+interface Meta {
   ticker: string | null;
   served_by: string | null;
   stale: boolean;

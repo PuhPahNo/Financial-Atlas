@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from ..core.config import settings
 from ..core.http import get_json
 from ..core import cache
-from .base import Capability, NewsArticle, Quote
+from .base import NewsArticle, Quote
 
 _BASE = "https://finnhub.io/api/v1"
 
@@ -19,10 +19,6 @@ class FinnhubProvider:
 
     def __init__(self):
         self.key = settings.finnhub_api_key
-        caps = set()
-        if self.key:
-            caps |= {Capability.NEWS, Capability.PROFILE, Capability.PRICES}
-        self.capabilities = frozenset(caps)
 
     @property
     def enabled(self) -> bool:

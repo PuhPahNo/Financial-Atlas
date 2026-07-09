@@ -20,7 +20,6 @@ from ..core.http import get_json, get_text
 from .base import (
     BalanceSheet,
     CashFlowStatement,
-    Capability,
     CompanyProfile,
     Filing,
     IncomeStatement,
@@ -75,10 +74,6 @@ CASHFLOW_TAGS = {
 
 class SecEdgarProvider:
     name = "sec_edgar"
-    capabilities = frozenset({
-        Capability.PROFILE, Capability.INCOME, Capability.BALANCE, Capability.CASHFLOW,
-        Capability.INSIDER, Capability.INSTITUTIONAL, Capability.FILINGS,
-    })
 
     # -- ticker / cik --------------------------------------------------------
     def _ticker_map(self) -> dict[str, dict]:

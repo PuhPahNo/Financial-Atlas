@@ -52,8 +52,7 @@ production credentials are mandatory. See [ADR 0004](../adr/0004-single-tenant-a
 - Required: `DATABASE_URL`, `BACKEND_URL=http://127.0.0.1:8000`, `ENV=production`,
   `SEC_USER_AGENT`, `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SECRET`.
 - Persistent cache: `CACHE_DIR`, `CACHE_MAX_MB`, `CACHE_MIN_FREE_MB`.
-- Optional providers: `OPENAI_API_KEY`, `FMP_API_KEY`, `FINNHUB_API_KEY`, `FRED_API_KEY`, and the
-  other variables documented in `backend/.env.example`.
+- Optional providers: `OPENAI_API_KEY`, `FMP_API_KEY`, and `FINNHUB_API_KEY`.
 
 Secrets live in Render; committed config contains no values.
 

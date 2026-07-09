@@ -1,28 +1,14 @@
-"""Provider interface and normalized domain models (PRD 02 §4, PRD 03 §5).
+"""Normalized provider-domain models (PRD 02 §4, PRD 03 §5).
 
 Providers adapt one external source and return these schema-valid domain
-objects — never raw upstream JSON. Capabilities are explicit so the fallback
-engine knows what each provider can serve.
+objects — never raw upstream JSON. The registry owns explicit fallback chains.
 """
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional
 
 from pydantic import BaseModel
-
-
-class Capability(str, Enum):
-    PROFILE = "profile"
-    PRICES = "prices"
-    INCOME = "income"
-    BALANCE = "balance"
-    CASHFLOW = "cashflow"
-    INSIDER = "insider"
-    INSTITUTIONAL = "institutional"
-    FILINGS = "filings"
-    NEWS = "news"
-    MACRO = "macro"
 
 
 class Period(str, Enum):
@@ -193,9 +179,3 @@ class Mover(BaseModel):
     price: Optional[float] = None
     change: Optional[float] = None
     change_pct: Optional[float] = None
-
-
-@runtime_checkable
-class Provider(Protocol):
-    name: str
-    capabilities: frozenset[Capability]

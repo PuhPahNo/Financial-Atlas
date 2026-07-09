@@ -2,6 +2,10 @@
 
 > Parent: [00-master-prd.md](00-master-prd.md) · Context layer around a company.
 
+> Implementation status: **partial**. Finnhub company news and Yahoo index/10Y context are live.
+> Earnings/dividend calendars, a FRED adapter, `/api/v1/macro`, and the dedicated macro panel are
+> future work; no dormant API-key settings pretend otherwise.
+
 ## 1. Purpose / why
 
 Provide timely context — company news, upcoming earnings and dividend dates, and macro indicators
