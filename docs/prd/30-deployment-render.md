@@ -40,7 +40,8 @@ infrastructure-as-code.
 
 ## 5. Contracts (config switches only)
 
-- `DATABASE_URL` → Postgres; same Alembic migrations run on deploy ([03 §7](03-data-model.md)).
+- `DATABASE_URL` → Postgres; the tracked application migrations run during backend startup
+  ([03 §7](03-data-model.md)).
 - `CACHE_BACKEND` → Render Disk or Key-Value ([05](05-caching-and-jobs.md)).
 - `JOB_SCHEDULER` → Render Cron (local was in-process APScheduler).
 - **Invariant:** application code is identical local vs Render; only env/config differs ([01 §6](01-architecture.md)).
@@ -48,13 +49,14 @@ infrastructure-as-code.
 ## 6. Migration path (SQLite → Postgres)
 
 1. Provision Render Postgres; set `DATABASE_URL` in the env group.
-2. Run Alembic migrations against Postgres (CI already tests both engines — [07 §8](07-testing-and-quality.md)).
+2. Start the backend; tracked migrations apply transactionally before the health check passes.
 3. Optional one-time data backfill (or just let refresh jobs repopulate from EDGAR — preferred, since
    the DB is a cache of public data).
 
 ## 7. CI/CD
 
-- Push to main → CI (lint/type/test) → Render auto-deploy on green. Migrations run as a release step.
+- Run `make verify`, push `main`, then Render builds and starts the replacement instance. Migrations
+  run before the backend health check; failed startup leaves the previous instance live.
 - Health check endpoint gates the deploy; rollback on failed health check.
 
 ## 8. Auth decision (open)

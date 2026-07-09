@@ -24,8 +24,6 @@ for noisy_logger in ("httpx", "httpcore"):
 
 log = logging.getLogger("app.live_mark")
 
-init_db()  # create tables if absent (SQLite locally, Postgres on Render)
-
 
 async def _live_mark_loop() -> None:
     """Pre-warm account live marks on an interval while the US market is open.

@@ -13,8 +13,8 @@ reproduce every value.
 
 - *As the maintainer,* I can trace any displayed number to its source provider and filing. **AC:**
   every fact row carries `source` + `filing_ref` + `fetched_at`.
-- *As the maintainer,* migrations run identically on SQLite and Postgres. **AC:** one Alembic
-  migration set; CI runs the suite on both engines.
+- *As the maintainer,* migrations run from one ordered revision list on SQLite and Postgres. **AC:**
+  each revision is transactional, recorded once, and tested against temporary SQLite databases.
 - *As a user,* derived metrics never silently overwrite reported values. **AC:** raw and derived
   live in separate tables/columns.
 
@@ -25,7 +25,8 @@ reproduce every value.
 
 ## 4. Conventions
 
-- **ORM:** SQLAlchemy; **migrations:** Alembic. Single migration history applied to both engines.
+- **ORM:** SQLAlchemy; **migrations:** the linear `app.migrations` runner, applied at startup after
+  additive model reconciliation.
 - **Type parity:** use SQLAlchemy generic types (`Numeric`, `String`, `Date`, `DateTime`,
   `JSON`/`JSONB`). Money = `Numeric(20,4)` (not float) to avoid rounding drift. `JSON` maps to TEXT on
   SQLite, JSONB on Postgres.
@@ -257,8 +258,11 @@ CREATE TABLE assistant_pending_actions (
 
 ## 7. Migrations
 
-- Alembic, one linear history. Every migration tested up+down on both SQLite and Postgres in CI.
-- SQLite-specific gotchas (limited `ALTER TABLE`) handled via batch operations.
+- `atlas_schema_migrations` records one linear revision history.
+- Additive model columns are reconciled first; explicit revisions handle backfills and removals.
+- Destructive revisions validate live data before DDL and fail closed when preconditions are not met.
+- SQLite migration behavior is covered by the local gate; Render startup is the current Postgres
+  integration proof until a hosted Postgres CI lane is added.
 
 ## 8. Dependencies
 
@@ -274,7 +278,7 @@ CREATE TABLE assistant_pending_actions (
 
 ## 10. Testing requirements
 
-- Migration round-trip on SQLite + Postgres.
+- Migration idempotence and fail-closed data guards on SQLite; production startup smoke on Postgres.
 - Numeric precision test: money stored/read as `Numeric` preserves cents (no float drift).
 - Provenance test: every inserted fact row has non-null `source` + `fetched_at`.
 

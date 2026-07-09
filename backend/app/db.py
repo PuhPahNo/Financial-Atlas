@@ -171,6 +171,8 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_columns()
+    from .migrations import run_migrations
+    run_migrations(engine)
 
 
 @contextmanager
