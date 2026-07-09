@@ -18,7 +18,7 @@ from app.core.rate_limit import reset_rate_limits
 from app.db import init_db, session_scope
 from app.db import CompanySnapshot, PitFundamental, Watchlist
 from app.models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
-from app.models.paper_trading import BacktestRun, PaperPortfolio, TraderAccount, TradingStrategy
+from app.models.paper_trading import BacktestRun, TraderAccount, TradingStrategy
 from app.models.valuation import ValuationResult
 
 init_db()  # the fresh temp DB needs its tables before any test touches it
@@ -29,8 +29,6 @@ def cleanup_feature_test_records():
     reset_rate_limits()
     yield
     with session_scope() as session:
-        for portfolio in session.query(PaperPortfolio).filter(PaperPortfolio.name.in_(["Fixture Portfolio", "Runnable Portfolio"])).all():
-            session.delete(portfolio)
         for run in session.query(BacktestRun).filter(BacktestRun.name.like("Test%")).all():
             session.delete(run)
         accounts = session.query(TraderAccount).filter(
@@ -63,8 +61,6 @@ def cleanup_feature_test_records():
                 "Test Fixture Momentum",
                 "Test Full QA Strategy",
                 "Test Full QA Strategy Saved",
-                "Test Income Portfolio",
-                "Test Run Portfolio",
                 "Test Signal Rule",
                 "Test Snapshot Strategy",
                 "Test Sweep Strategy",

@@ -40,7 +40,8 @@ Initial tools:
 - propose strategy model
 - create, update, archive, or delete strategy model after confirmation
 - run backtest
-- create simulated portfolio after confirmation
+- list and inspect simulated trader profiles
+- assign a strategy to a trader or rebalance allocations after confirmation
 
 ## 5. Memory
 

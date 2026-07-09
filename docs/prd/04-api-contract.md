@@ -104,9 +104,14 @@ POST /api/v1/paper-trading/strategies/{id}/clone → clone seeded/user strategy
 DELETE /api/v1/paper-trading/strategies/{id} → archive/delete user strategy
 POST /api/v1/backtests                       → run strategy backtest (see 23)
 GET  /api/v1/backtests/{id}                  → persisted run, trades, equity curve
-POST /api/v1/paper-trading/portfolios        → create simulated portfolio
-GET  /api/v1/paper-trading/portfolios        → list simulated portfolios
-GET  /api/v1/paper-trading/portfolios/{id}   → positions, orders, fills, snapshots
+POST /api/v1/paper-trading/accounts          → create simulated trader profile
+GET  /api/v1/paper-trading/accounts          → list simulated trader profiles
+GET  /api/v1/paper-trading/accounts/{id}     → profile and strategy allocations
+PUT  /api/v1/paper-trading/accounts/{id}     → update profile and allocations
+POST /api/v1/paper-trading/accounts/{id}/rebalance-preview → preview allocation change
+POST /api/v1/paper-trading/accounts/{id}/rebalance → apply allocation change
+GET  /api/v1/paper-trading/accounts/{id}/performance → replayed multi-strategy performance
+GET  /api/v1/paper-trading/accounts/{id}/value → lightweight current account mark
 ```
 
 ### Research assistant

@@ -205,9 +205,6 @@ def _result_ref(action: str, result: dict) -> dict:
     if action == "rebalance_account" and result.get("account"):
         account = result["account"]
         return {"type": "account", "id": account.get("id"), "name": account.get("name"), "allocation_count": len(account.get("allocations", []))}
-    if action == "create_portfolio" and result.get("portfolio"):
-        portfolio = result["portfolio"]
-        return {"type": "portfolio", "id": portfolio.get("id"), "name": portfolio.get("name")}
     return {"type": action, "status": "confirmed"}
 
 
@@ -721,8 +718,6 @@ def _action_summary(action: str, payload: dict) -> str:
         return f"Update model “{payload.get('strategy_name', payload.get('strategy_id', 'selected strategy'))}”"
     if action == "delete_strategy":
         return f"Archive model “{payload.get('strategy_name', payload.get('strategy_id', 'selected strategy'))}”"
-    if action == "create_portfolio":
-        return f"Create portfolio “{payload.get('name', 'Assistant Portfolio')}”"
     return f"Run {action.replace('_', ' ')}"
 
 

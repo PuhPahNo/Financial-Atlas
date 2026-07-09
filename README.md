@@ -17,8 +17,8 @@ The user-facing product name is **Atlas**. The repository and internal docs stil
   blended fair value, margin of safety, editable assumptions, and valuation history.
 - **Screener and watchlists**: multi-criteria local-universe screening, universe warming, watchlist
   tracking, live price versus fair value, upside, and margin of safety.
-- **Paper trading**: seeded strategy catalog, strategy CRUD/clone/validation, simulated portfolios,
-  trader accounts, allocation/rebalance flows, and account performance/value endpoints.
+- **Paper trading**: seeded strategy catalog, strategy CRUD/clone/validation, trader accounts,
+  allocation/rebalance flows, and account performance/value endpoints.
 - **Backtesting**: active-universe screening, point-in-time membership support, factor tests,
   parameter sweeps, and documented caveats for free-data limitations.
 - **Research assistant**: assistant sessions with confirmed tool actions for local Atlas workflows

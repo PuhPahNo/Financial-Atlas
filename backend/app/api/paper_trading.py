@@ -8,13 +8,11 @@ from datetime import date
 from fastapi import APIRouter, Depends
 
 from ..core.deps import require_paper_trading_access
-from ..paper_trading import accounts, portfolio, service
+from ..paper_trading import accounts, service
 from ..paper_trading.schemas import (
     AccountCreate,
     AccountRebalanceRequest,
     AccountUpdate,
-    PortfolioCreate,
-    PortfolioRun,
     StrategyCreate,
     StrategyUpdate,
     StrategyValidationRequest,
@@ -75,26 +73,6 @@ def list_archived_strategies():
 @router.post("/paper-trading/strategies/{strategy_id}/unarchive")
 def unarchive_strategy(strategy_id: int):
     return envelope(service.unarchive_strategy(strategy_id))
-
-
-@router.post("/paper-trading/portfolios")
-def create_portfolio(payload: PortfolioCreate):
-    return envelope(portfolio.create_portfolio(payload))
-
-
-@router.get("/paper-trading/portfolios")
-def portfolios():
-    return envelope(portfolio.list_portfolios())
-
-
-@router.get("/paper-trading/portfolios/{portfolio_id}")
-def get_portfolio(portfolio_id: int):
-    return envelope(portfolio.get_portfolio(portfolio_id))
-
-
-@router.post("/paper-trading/portfolios/{portfolio_id}/run")
-def run_portfolio(portfolio_id: int, payload: PortfolioRun):
-    return envelope(portfolio.run_portfolio(portfolio_id, payload))
 
 
 # ---- Trader accounts ("fake traders") ------------------------------------

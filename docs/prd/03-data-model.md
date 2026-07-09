@@ -218,28 +218,16 @@ CREATE TABLE backtest_equity_points (
   date DATE, cash NUMERIC(20,4), equity NUMERIC(20,4), benchmark_equity NUMERIC(20,4)
 );
 
-CREATE TABLE paper_portfolios (
-  id INTEGER PRIMARY KEY, strategy_id INTEGER REFERENCES trading_strategies(id),
-  name TEXT NOT NULL, cash NUMERIC(20,4), status TEXT DEFAULT 'active',
+CREATE TABLE trader_accounts (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, emoji TEXT, bio TEXT,
+  starting_cash NUMERIC(20,4), status TEXT DEFAULT 'active',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE paper_positions (
-  id INTEGER PRIMARY KEY, portfolio_id INTEGER REFERENCES paper_portfolios(id),
-  ticker TEXT NOT NULL, quantity NUMERIC(20,6), average_cost NUMERIC(20,4),
-  last_price NUMERIC(20,4), updated_at TIMESTAMP
-);
-
-CREATE TABLE paper_orders (
-  id INTEGER PRIMARY KEY, portfolio_id INTEGER REFERENCES paper_portfolios(id),
-  ticker TEXT, side TEXT, quantity NUMERIC(20,6), status TEXT, reason TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE paper_fills (
-  id INTEGER PRIMARY KEY, order_id INTEGER REFERENCES paper_orders(id),
-  filled_at TIMESTAMP, price NUMERIC(20,4), quantity NUMERIC(20,6),
-  source TEXT, assumption TEXT
+CREATE TABLE account_allocations (
+  id INTEGER PRIMARY KEY, account_id INTEGER REFERENCES trader_accounts(id),
+  strategy_id INTEGER REFERENCES trading_strategies(id), weight NUMERIC(7,4),
+  UNIQUE (account_id, strategy_id)
 );
 
 CREATE TABLE assistant_sessions (

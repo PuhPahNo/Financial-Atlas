@@ -100,7 +100,8 @@ local cache + SQLite (→ Postgres on Render). Full detail in [01-architecture.m
 - **Raw vs Derived:** *raw* = values as reported by a source; *derived* = values we compute. They
   are stored separately ([03-data-model.md](03-data-model.md)).
 - **Paper strategy:** a saved, parameterized research model that emits simulated trading signals.
-- **Paper portfolio:** a local simulated account with cash, positions, orders, fills, and snapshots.
+- **Trader account:** a local simulated profile that allocates starting capital across one or more
+  strategies and replays those sleeves over real historical prices.
 - **Backtest:** a deterministic historical simulation using documented data and fill assumptions.
 
 ## 8. PRD index

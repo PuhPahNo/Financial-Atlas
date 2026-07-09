@@ -104,15 +104,5 @@ class AccountRebalanceRequest(BaseModel):
     allocations: list[AllocationInput] = Field(default_factory=list)
 
 
-class PortfolioCreate(BaseModel):
-    strategy_id: int
-    name: str = Field(min_length=2, max_length=120)
-    starting_cash: float = Field(default=100000.0, gt=0)
-
-
-class PortfolioRun(BaseModel):
-    use_fixture_data: bool = False
-
-
 def normalize_tickers(tickers: list[str]) -> list[str]:
     return [ticker.strip().upper() for ticker in tickers if ticker.strip()]

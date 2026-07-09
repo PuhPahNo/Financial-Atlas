@@ -6,7 +6,6 @@ from datetime import date
 from ..core.errors import NotFoundError
 from ..paper_trading.schemas import StrategyCreate
 from ..paper_trading import accounts as account_service
-from ..paper_trading import portfolio as portfolio_service
 from ..paper_trading import service as paper_service
 from ..services import company, financials, prices
 from ..valuation import service as valuation_service
@@ -127,10 +126,6 @@ def execute_write_tool(action: str, payload: dict) -> dict:
         return paper_service.delete_strategy(_strategy_id(payload))
     if action == "clone_strategy":
         return paper_service.clone_strategy(_strategy_id(payload))
-    if action == "create_portfolio":
-        from ..paper_trading.schemas import PortfolioCreate
-
-        return portfolio_service.create_portfolio(PortfolioCreate(**payload))
     if action == "assign_strategy_to_account":
         return account_service.assign_strategy_to_account(
             account_name=str(payload.get("account_name", "")),

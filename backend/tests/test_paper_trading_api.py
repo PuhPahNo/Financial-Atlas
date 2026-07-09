@@ -259,51 +259,9 @@ def test_parameter_sweep_persists_ranked_variant_runs():
     assert first_run["strategy_snapshot"]["parameters"]["risk"] == sweep["runs"][0]["value"]
 
 
-def test_create_paper_portfolio_from_strategy():
-    strategy = client.post(
-        "/api/v1/paper-trading/strategies",
-        json={
-            "category": "income_quality",
-            "name": "Test Income Portfolio",
-            "description": "Income test.",
-            "methodology": "Fixture portfolio.",
-            "parameters": {"tickers": ["AAA"]},
-        },
-    ).json()["data"]["strategy"]
-
-    res = client.post(
-        "/api/v1/paper-trading/portfolios",
-        json={"strategy_id": strategy["id"], "name": "Fixture Portfolio", "starting_cash": 25000},
-    )
-    assert res.status_code == 200
-    portfolio = res.json()["data"]["portfolio"]
-    assert portfolio["cash"] == 25000
-    assert portfolio["positions"] == []
-
-
-def test_run_paper_portfolio_creates_order_fill_and_position():
-    strategy = client.post(
-        "/api/v1/paper-trading/strategies",
-        json={
-            "category": "risk_rotation",
-            "name": "Test Run Portfolio",
-            "description": "Run test.",
-            "methodology": "Fixture paper run.",
-            "parameters": {"tickers": ["AAA"], "allocation_pct": 0.5},
-        },
-    ).json()["data"]["strategy"]
-    portfolio = client.post(
-        "/api/v1/paper-trading/portfolios",
-        json={"strategy_id": strategy["id"], "name": "Runnable Portfolio", "starting_cash": 1000},
-    ).json()["data"]["portfolio"]
-
-    res = client.post(f"/api/v1/paper-trading/portfolios/{portfolio['id']}/run", json={"use_fixture_data": True})
-    assert res.status_code == 200
-    updated = res.json()["data"]["portfolio"]
-    assert updated["cash"] < 1000
-    assert updated["positions"][0]["ticker"] == "AAA"
-    assert updated["orders"][0]["status"] == "filled"
-    assert updated["orders"][0]["fills"][0]["source"] == "fixture"
+def test_obsolete_single_strategy_portfolio_api_is_not_exposed():
+    assert client.get("/api/v1/paper-trading/portfolios").status_code == 404
+    assert client.post("/api/v1/paper-trading/portfolios", json={}).status_code == 404
 
 
 def test_trader_account_crud_and_allocation_validation():

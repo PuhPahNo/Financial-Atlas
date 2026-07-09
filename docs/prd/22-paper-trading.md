@@ -1,6 +1,6 @@
 # 22 — Paper Trading
 
-> Parent: [00-master-prd.md](00-master-prd.md) · Simulated portfolios for research workflows.
+> Parent: [00-master-prd.md](00-master-prd.md) · Simulated trader profiles for research workflows.
 
 ## 1. Purpose / why
 
@@ -16,13 +16,15 @@ research tool, not financial advice.
   are validated and saved with the strategy definition.
 - *As a maintainer,* I can keep the interface clean. **AC:** user-created models support full CRUD;
   seeded models can be cloned but not destructively deleted.
-- *As a user,* I can run a selected model forward in a simulated portfolio. **AC:** positions, cash,
-  fills, orders, and equity snapshots are stored with source metadata.
+- *As a user,* I can allocate one simulated trader across multiple models. **AC:** weights cannot
+  exceed 100%, the unallocated remainder stays in cash, and rebalances require an explicit action.
+- *As a user,* I can inspect replayed account performance. **AC:** Atlas shows the historical window,
+  benchmark comparison, drawdown, strategy contributions, and a clear simulated-not-realized label.
 
 ## 3. Scope (in / out)
 
-- **In:** simulated portfolios, strategy categories, strategy CRUD, model cards, parameter schemas,
-  simulated orders/fills, positions, cash ledger, and equity snapshots.
+- **In:** trader profiles, multi-strategy allocations, rebalance preview/apply, strategy categories,
+  strategy CRUD, model cards, account marks, and replayed performance/risk attribution.
 - **Out:** real brokerage integrations, order execution, moving money, personalized advice, intraday
   tick simulation, and deep options-flow data.
 
@@ -38,15 +40,15 @@ research tool, not financial advice.
 
 ## 5. Data model
 
-Paper trading uses local persisted strategy definitions and simulated account state. Every simulated
-fill records its data source, input price, execution rule, and timestamp. `user_id` defaults to
-`local` until hosted accounts are introduced.
+Paper trading persists strategy definitions, trader profiles, and weighted account allocations.
+Performance is a reproducible replay of the current allocation over real historical prices; it is
+not a realized order/fill ledger. `user_id` remains implicit until hosted accounts are introduced.
 
 ## 6. UI requirements
 
-The top-level `/paper-trading` page shows category tabs, model cards, strategy editor, portfolio
-summary, positions, trades, equity curve, holdings chart, and assistant panel. CRUD controls must be
-keyboard accessible and destructive actions must be explicit.
+The top-level `/paper-trading` page shows model cards, a rule builder, backtest history, trader cards,
+allocation controls, equity/drawdown charts, contribution/risk summaries, and the assistant. CRUD
+controls must be keyboard accessible and destructive actions must be explicit.
 
 ## 7. Edge cases
 
@@ -58,10 +60,11 @@ keyboard accessible and destructive actions must be explicit.
 ## 8. Testing requirements
 
 - CRUD contract tests cover create, update, clone, archive/delete, and seeded-model protection.
-- Portfolio tests cover cash, long fills, short fills, rejected orders, and equity snapshots.
+- Trader tests cover allocation validation, rebalance previews, performance attribution, account
+  marks, and archive/delete behavior.
 - UI smoke test verifies `/paper-trading` renders with empty and seeded states.
 
 ## 9. Done criteria
 
-The user can create a custom model, tune parameters, run it in a simulated portfolio, inspect
-positions/trades/equity snapshots, and archive obsolete models without touching real brokerage APIs.
+The user can create and backtest a model, allocate it to a simulated trader, inspect replayed
+performance and risk, rebalance the profile, and archive obsolete models without touching a broker.
