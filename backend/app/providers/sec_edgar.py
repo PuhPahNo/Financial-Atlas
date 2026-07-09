@@ -412,6 +412,61 @@ def _period_key(e: dict, period: Period) -> tuple[int, str] | None:
     return (fy, fp if fp.startswith("Q") else f"Q@{end}")
 
 
+def _fact_matches_period(entry: dict, period: Period, *, instant: bool) -> bool:
+    form = entry.get("form", "")
+    if period is Period.ANNUAL:
+        if not form.startswith(("10-K", "20-F", "40-F")):
+            return False
+        return instant or _is_annual_flow(entry)
+    if not form.startswith("10-Q"):
+        return False
+    return instant or _is_quarter_flow(entry)
+
+
+def _should_select_fact(
+    previous: tuple[int, str] | None,
+    priority: int,
+    filed: str,
+    *,
+    point_in_time: bool,
+) -> bool:
+    if point_in_time:
+        if not filed:
+            return False
+        # Earliest filing wins; tag priority only breaks a same-filing tie.
+        return previous is None or not (
+            previous[1] < filed or (previous[1] == filed and previous[0] <= priority)
+        )
+    if previous is None:
+        return True
+    if previous[0] < priority:
+        return False
+    return previous[0] != priority or filed >= previous[1]
+
+
+def _finalize_point_in_time_rows(
+    rows: dict[tuple[int, str], dict],
+    chosen: dict[tuple, tuple[int, str]],
+    tag_map: dict[str, list[str]],
+) -> None:
+    # A row becomes public knowledge on its earliest filing. Fields whose first
+    # tagged appearance is later are removed instead of leaking future data.
+    for key, row in rows.items():
+        filed_dates = [
+            chosen[(key, field)][1]
+            for field in tag_map
+            if (key, field) in chosen and chosen[(key, field)][1]
+        ]
+        if not filed_dates:
+            continue
+        original = min(filed_dates)
+        for field in tag_map:
+            marker = (key, field)
+            if marker in chosen and chosen[marker][1] > original:
+                row[field] = None
+        row["filing_date"] = original
+
+
 def _build_periods(facts: dict, tag_map: dict[str, list[str]], period: Period, *, instant: bool,
                    point_in_time: bool = False) -> dict:
     """Return ``{(fiscal_year, period_label): {field: value}}`` for all fields.
@@ -429,44 +484,17 @@ def _build_periods(facts: dict, tag_map: dict[str, list[str]], period: Period, *
     for field, tags in tag_map.items():
         for priority, entries in _entries_by_priority(facts, tags):
             for e in entries:
-                form = e.get("form", "")
                 val = e.get("val")
-                if val is None:
+                if val is None or not _fact_matches_period(e, period, instant=instant):
                     continue
-                if period is Period.ANNUAL:
-                    # 10-K (domestic) + 20-F / 40-F (foreign private issuers, e.g. ADRs like BABA, BIDU).
-                    if not form.startswith(("10-K", "20-F", "40-F")):
-                        continue
-                    if not instant and not _is_annual_flow(e):
-                        continue
-                else:
-                    if not form.startswith("10-Q"):
-                        continue
-                    if not instant and not _is_quarter_flow(e):
-                        continue
                 key = _period_key(e, period)
                 if key is None:
                     continue
                 marker_key = (key, field)
                 filed = e.get("filed", "")
                 prev = chosen.get(marker_key)
-                if point_in_time:
-                    # The earliest filing wins regardless of tag preference — it is what an
-                    # investor actually knew first. (Companies switch tags over time, e.g.
-                    # ASC-606 revenue: the preferred tag's first appearance is often a later
-                    # comparative filing, and choosing it would hide the row for a year.)
-                    # Tag priority only breaks ties within the same filing. Undated entries
-                    # can't be gated, so they are skipped entirely.
-                    if not filed:
-                        continue
-                    if prev is not None and (prev[1] < filed or (prev[1] == filed and prev[0] <= priority)):
-                        continue
-                else:
-                    if prev is not None:
-                        if prev[0] < priority:
-                            continue  # a higher-priority tag already filled this field
-                        if prev[0] == priority and filed < prev[1]:
-                            continue  # same tag: keep the most recent restatement
+                if not _should_select_fact(prev, priority, filed, point_in_time=point_in_time):
+                    continue
                 chosen[marker_key] = (priority, filed)
                 row = rows.setdefault(key, {})
                 row[field] = float(val)
@@ -475,21 +503,7 @@ def _build_periods(facts: dict, tag_map: dict[str, list[str]], period: Period, *
                 if e.get("accn"):
                     row["filing_ref"] = e["accn"]
     if point_in_time:
-        # A row becomes public knowledge when its statement was *originally* filed — the
-        # earliest filing across its fields. Fields whose first tagged appearance is a
-        # *later* filing (tag-scheme changes, restated comparatives) were not knowable
-        # then, so they are dropped rather than allowed to either leak future data or
-        # (via a max() gate) hide the whole row for a year.
-        for key, row in rows.items():
-            filed_dates = [chosen[(key, f)][1] for f in tag_map if (key, f) in chosen and chosen[(key, f)][1]]
-            if not filed_dates:
-                continue
-            original = min(filed_dates)
-            for f in tag_map:
-                marker = (key, f)
-                if marker in chosen and chosen[marker][1] > original:
-                    row[f] = None
-            row["filing_date"] = original
+        _finalize_point_in_time_rows(rows, chosen, tag_map)
     return rows
 
 

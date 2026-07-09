@@ -115,48 +115,43 @@ def _validate_options_profile(params: dict[str, Any], issues: list[dict[str, str
         issues.append(_issue("parameters.synthetic_options.assumption", "required", "Synthetic options assumption is required."))
 
 
-def validate_strategy_config(category: Category | str, parameters: dict[str, Any] | None) -> dict[str, Any]:
-    """Return field-level validation details plus normalized parameters.
+def _validation_result(params: dict[str, Any], issues: list[dict[str, str]]) -> dict[str, Any]:
+    return {"valid": not issues, "issues": issues, "warnings": [], "parameters": params}
 
-    Catalogue/guided strategies can stay broad, but explicit rule strategies use
-    a typed schema so malformed user or assistant-created configs never reach the
-    backtest engine by coincidence.
-    """
-    issues: list[dict[str, str]] = []
-    warnings: list[dict[str, str]] = []
-    params = deepcopy(parameters or {})
-    family = str(category)
 
-    tickers = normalize_tickers(_as_list(params.get("tickers")))
-    params["tickers"] = tickers
+def _validate_catalogue_config(
+    params: dict[str, Any],
+    tickers: list[str],
+    issues: list[dict[str, str]],
+) -> None:
+    model = str(params.get("model") or "").strip().lower()
+    if model:
+        from ..backtesting.screen import MODELS  # late import — avoids module cycles
+        if model not in MODELS:
+            issues.append(_issue(
+                "parameters.model",
+                "invalid_choice",
+                f"Model '{model}' is not in the model library ({', '.join(sorted(MODELS))}).",
+            ))
+        params["model"] = model
+        # Index-scanning models need no tickers; fixed baskets must declare their members.
+        if str(params.get("universe") or "").lower() in {"tickers", "fixed", "custom"} and not tickers:
+            issues.append(_issue(
+                "parameters.tickers",
+                "required",
+                "Fixed-universe models need at least one ticker to trade.",
+            ))
+    elif not tickers:
+        issues.append(_issue("parameters.tickers", "required", "At least one ticker is required."))
 
-    rules = params.get("rules")
-    if rules is None:
-        model = str(params.get("model") or "").strip().lower()
-        if model:
-            from ..backtesting.screen import MODELS  # late import — avoids module cycles
-            if model not in MODELS:
-                issues.append(_issue("parameters.model", "invalid_choice",
-                                     f"Model '{model}' is not in the model library ({', '.join(sorted(MODELS))})."))
-            params["model"] = model
-            # Index-scanning models need no tickers (they screen the point-in-time S&P 500
-            # universe); fixed-basket models must declare what they rotate across.
-            if str(params.get("universe") or "").lower() in {"tickers", "fixed", "custom"} and not tickers:
-                issues.append(_issue("parameters.tickers", "required",
-                                     "Fixed-universe models need at least one ticker to trade."))
-        elif not tickers:
-            issues.append(_issue("parameters.tickers", "required", "At least one ticker is required."))
-        return {"valid": not issues, "issues": issues, "warnings": warnings, "parameters": params}
 
-    if not isinstance(rules, dict):
-        issues.append(_issue("parameters.rules", "invalid_type", "Rules must be an object."))
-        return {"valid": False, "issues": issues, "warnings": warnings, "parameters": params}
-
-    signal = rules.get("signal") or {}
-    if not isinstance(signal, dict):
-        issues.append(_issue("parameters.rules.signal", "invalid_type", "Signal must be an object."))
-        signal = {}
-
+def _normalize_rule_identity(
+    family: str,
+    params: dict[str, Any],
+    rules: dict[str, Any],
+    tickers: list[str],
+    issues: list[dict[str, str]],
+) -> str:
     instrument = _symbol(rules.get("instrument") or (tickers[0] if tickers else ""))
     if not instrument:
         issues.append(_issue("parameters.rules.instrument", "required", "Instrument ticker is required."))
@@ -177,61 +172,54 @@ def validate_strategy_config(category: Category | str, parameters: dict[str, Any
             "Long-term, income, and risk-rotation rule strategies must use long exposure. Use the Short Selling family for bearish rules.",
         ))
     if family == "short_selling" and direction != "short":
-        issues.append(_issue("parameters.rules.direction", "incompatible_family", "Short Selling rule strategies must use short direction."))
+        issues.append(_issue(
+            "parameters.rules.direction",
+            "incompatible_family",
+            "Short Selling rule strategies must use short direction.",
+        ))
+    return instrument
+
+
+def _normalize_signal(rules: dict[str, Any], instrument: str, issues: list[dict[str, str]]) -> None:
+    signal = rules.get("signal") or {}
+    if not isinstance(signal, dict):
+        issues.append(_issue("parameters.rules.signal", "invalid_type", "Signal must be an object."))
+        signal = {}
 
     signal_type = str(signal.get("type") or rules.get("signal_type") or "").strip().lower()
     if not signal_type:
         issues.append(_issue("parameters.rules.signal.type", "required", "Signal type is required."))
     elif signal_type not in RULE_SIGNAL_TYPES:
-        issues.append(_issue("parameters.rules.signal.type", "invalid_choice", f"Signal type '{signal_type}' is not supported."))
+        issues.append(_issue(
+            "parameters.rules.signal.type",
+            "invalid_choice",
+            f"Signal type '{signal_type}' is not supported.",
+        ))
     signal["type"] = signal_type
 
     reference = _symbol(signal.get("reference") or rules.get("reference") or "")
     if not reference and signal_type in {"new_high", "new_low"}:
         reference = "^GSPC"
-    elif not reference:
-        reference = instrument
-    signal["reference"] = reference
+    signal["reference"] = reference or instrument
 
     if signal_type in {"pct_drop", "pct_gain"}:
         signal["pct"] = _pct(
-            value=signal.get("pct"),
-            fallback=0.05,
-            field="parameters.rules.signal.pct",
-            label="Signal move size",
-            issues=issues,
-            maximum=1.0,
+            value=signal.get("pct"), fallback=0.05, field="parameters.rules.signal.pct",
+            label="Signal move size", issues=issues, maximum=1.0,
         )
         signal["window_days"] = _bounded_int(
-            value=signal.get("window_days") or signal.get("days"),
-            fallback=21,
-            field="parameters.rules.signal.window_days",
-            label="Signal lookback window",
-            issues=issues,
-            minimum=1,
-            maximum=252,
-            required=True,
+            value=signal.get("window_days") or signal.get("days"), fallback=21,
+            field="parameters.rules.signal.window_days", label="Signal lookback window",
+            issues=issues, minimum=1, maximum=252, required=True,
         )
     elif signal_type in {"ma_cross_up", "ma_cross_down"}:
         fast = _bounded_int(
-            value=signal.get("fast_days"),
-            fallback=20,
-            field="parameters.rules.signal.fast_days",
-            label="Fast moving average",
-            issues=issues,
-            minimum=1,
-            maximum=252,
-            required=True,
+            value=signal.get("fast_days"), fallback=20, field="parameters.rules.signal.fast_days",
+            label="Fast moving average", issues=issues, minimum=1, maximum=252, required=True,
         )
         slow = _bounded_int(
-            value=signal.get("slow_days"),
-            fallback=50,
-            field="parameters.rules.signal.slow_days",
-            label="Slow moving average",
-            issues=issues,
-            minimum=2,
-            maximum=500,
-            required=True,
+            value=signal.get("slow_days"), fallback=50, field="parameters.rules.signal.slow_days",
+            label="Slow moving average", issues=issues, minimum=2, maximum=500, required=True,
         )
         if fast is not None and slow is not None and fast >= slow:
             issues.append(_issue(
@@ -243,51 +231,67 @@ def validate_strategy_config(category: Category | str, parameters: dict[str, Any
         signal["slow_days"] = slow
     elif signal_type in {"new_high", "new_low"} and signal.get("lookback_days") is not None:
         signal["lookback_days"] = _bounded_int(
-            value=signal.get("lookback_days"),
-            fallback=None,
-            field="parameters.rules.signal.lookback_days",
-            label="High/low lookback",
-            issues=issues,
-            minimum=2,
-            maximum=2520,
+            value=signal.get("lookback_days"), fallback=None,
+            field="parameters.rules.signal.lookback_days", label="High/low lookback",
+            issues=issues, minimum=2, maximum=2520,
         )
+    rules["signal"] = signal
 
+
+def _normalize_rule_exits(family: str, rules: dict[str, Any], issues: list[dict[str, str]]) -> None:
     rules["take_profit_pct"] = _pct(
-        value=rules.get("take_profit_pct", rules.get("take_profit")),
-        fallback=0.10,
-        field="parameters.rules.take_profit_pct",
-        label="Take profit",
-        issues=issues,
-        maximum=2.0,
+        value=rules.get("take_profit_pct", rules.get("take_profit")), fallback=0.10,
+        field="parameters.rules.take_profit_pct", label="Take profit", issues=issues, maximum=2.0,
     )
     rules["stop_loss_pct"] = _pct(
-        value=rules.get("stop_loss_pct", rules.get("stop_loss")),
-        fallback=0.05,
-        field="parameters.rules.stop_loss_pct",
-        label="Stop loss",
-        issues=issues,
-        maximum=1.0,
+        value=rules.get("stop_loss_pct", rules.get("stop_loss")), fallback=0.05,
+        field="parameters.rules.stop_loss_pct", label="Stop loss", issues=issues, maximum=1.0,
     )
     if family == "short_selling" and rules.get("stop_loss_pct") and rules["stop_loss_pct"] > 0.50:
-        issues.append(_issue("parameters.rules.stop_loss_pct", "out_of_range", "Short Selling stop loss must be no more than 50%."))
-
+        issues.append(_issue(
+            "parameters.rules.stop_loss_pct",
+            "out_of_range",
+            "Short Selling stop loss must be no more than 50%.",
+        ))
     max_hold = _bounded_int(
-        value=rules.get("max_hold_days"),
-        fallback=None,
-        field="parameters.rules.max_hold_days",
-        label="Max holding period",
-        issues=issues,
-        minimum=0,
-        maximum=1095,
+        value=rules.get("max_hold_days"), fallback=None, field="parameters.rules.max_hold_days",
+        label="Max holding period", issues=issues, minimum=0, maximum=1095,
     )
     rules["max_hold_days"] = max_hold or None
-    rules["signal"] = signal
+
+
+def validate_strategy_config(category: Category | str, parameters: dict[str, Any] | None) -> dict[str, Any]:
+    """Return field-level validation details plus normalized parameters.
+
+    Catalogue/guided strategies can stay broad, but explicit rule strategies use
+    a typed schema so malformed user or assistant-created configs never reach the
+    backtest engine by coincidence.
+    """
+    issues: list[dict[str, str]] = []
+    params = deepcopy(parameters or {})
+    family = str(category)
+
+    tickers = normalize_tickers(_as_list(params.get("tickers")))
+    params["tickers"] = tickers
+
+    rules = params.get("rules")
+    if rules is None:
+        _validate_catalogue_config(params, tickers, issues)
+        return _validation_result(params, issues)
+
+    if not isinstance(rules, dict):
+        issues.append(_issue("parameters.rules", "invalid_type", "Rules must be an object."))
+        return _validation_result(params, issues)
+
+    instrument = _normalize_rule_identity(family, params, rules, tickers, issues)
+    _normalize_signal(rules, instrument, issues)
+    _normalize_rule_exits(family, rules, issues)
     params["rules"] = rules
 
     if family == "options":
         _validate_options_profile(params, issues)
 
-    return {"valid": not issues, "issues": issues, "warnings": warnings, "parameters": params}
+    return _validation_result(params, issues)
 
 
 def validate_or_raise(category: Category | str, parameters: dict[str, Any] | None) -> dict[str, Any]:

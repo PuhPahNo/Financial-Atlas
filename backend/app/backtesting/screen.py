@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import threading
 from bisect import bisect_left
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from ..core import cache
@@ -386,6 +387,268 @@ def warm_universe_for_backtests(universe: list[str] | None = None, *, end_date: 
     return {"universe": len(universe), "prices_warmed": prices_ok, "fundamentals_warmed": funds_ok}
 
 
+@dataclass(frozen=True)
+class _ActiveConfig:
+    category: str
+    params: dict
+    top_n: int
+    take_profit: float
+    stop_loss: float
+    max_hold: int
+    cost_rate: float
+
+
+def _active_config(strategy: dict, transaction_cost_bps: float, slippage_bps: float) -> _ActiveConfig:
+    category = strategy.get("category") or "short_term"
+    params = strategy.get("parameters", {}) or {}
+    top_n = _max_positions(category, params)
+    if category != "risk_rotation":
+        try:
+            top_n = max(1, int(params.get("max_positions") or 15))
+        except (TypeError, ValueError):
+            top_n = 15
+    return _ActiveConfig(
+        category=category,
+        params=params,
+        top_n=top_n,
+        take_profit=_pct(params.get("take_profit_pct") or params.get("take_profit"), 0.25),
+        stop_loss=_pct(params.get("stop_loss_pct") or params.get("stop_loss"), 0.12),
+        max_hold=int(params.get("max_hold_days") or 252),
+        cost_rate=(transaction_cost_bps + slippage_bps) / 10000,
+    )
+
+
+def _load_active_market_data(
+    universe: list[str],
+    warmup_start: date,
+    end_date: date,
+    benchmark: str,
+    warnings: list[str],
+) -> tuple[dict[str, tuple[list[str], list[float]]], list[str], list[float]]:
+    series: dict[str, tuple[list[str], list[float]]] = {}
+    for ticker in universe:
+        if _is_dead(ticker):
+            continue
+        try:
+            dates, closes = _load_series(ticker, warmup_start, end_date)
+            if closes:
+                series[ticker] = (dates, closes)
+        except Exception:  # noqa: BLE001 — symbol won't resolve (often delisted)
+            _mark_dead(ticker)
+    if not series:
+        raise ValidationError("No price history available for the universe in this window")
+
+    missing = [ticker for ticker in universe if ticker not in series]
+    if missing:
+        shown = ", ".join(missing[:8]) + ("…" if len(missing) > 8 else "")
+        warnings.append(
+            f"{len(missing)} of {len(universe)} universe names had no loadable price "
+            f"history in this window (delisted or provider gaps): {shown}"
+        )
+
+    benchmark_dates: list[str] = []
+    benchmark_closes: list[float] = []
+    if benchmark:
+        try:
+            benchmark_dates, benchmark_closes = _load_series(benchmark, warmup_start, end_date)
+        except Exception:  # noqa: BLE001
+            warnings.append(f"Benchmark {benchmark.upper()} history was unavailable for this window.")
+    return series, benchmark_dates, benchmark_closes
+
+
+def _active_calendar(
+    series: dict[str, tuple[list[str], list[float]]],
+    start_date: date,
+    end_date: date,
+) -> list[date]:
+    start, end = start_date.isoformat(), end_date.isoformat()
+    available = {
+        day
+        for dates, _closes in series.values()
+        for day in dates
+        if start <= day <= end
+    }
+    calendar = [date.fromisoformat(day) for day in sorted(available)]
+    if len(calendar) < 2:
+        raise ValidationError("Not enough trading days in the window")
+    return calendar
+
+
+class _ActiveSimulation:
+    def __init__(
+        self,
+        *,
+        config: _ActiveConfig,
+        series: dict[str, tuple[list[str], list[float]]],
+        starting_cash: float,
+        membership_on,
+        benchmark_dates: list[str],
+        benchmark_closes: list[float],
+        first_day: date,
+        warnings: list[str],
+    ) -> None:
+        self.config = config
+        self.series = series
+        self.starting_cash = starting_cash
+        self.membership_on = membership_on
+        self.benchmark_dates = benchmark_dates
+        self.benchmark_closes = benchmark_closes
+        self.benchmark_first = (
+            factors.close_at(benchmark_dates, benchmark_closes, first_day)
+            if benchmark_closes else None
+        )
+        self.warnings = warnings
+        self.cash = float(starting_cash)
+        self.positions: dict[str, dict] = {}
+        self.trades: list[dict] = []
+        self.equity_curve: list[dict] = []
+
+    def close(self, ticker: str, day: date) -> float | None:
+        dates, closes = self.series[ticker]
+        return factors.close_at(dates, closes, day)
+
+    def bar_on(self, ticker: str, day: date) -> float | None:
+        """Return a close only when the ticker actually traded on this day."""
+        dates, closes = self.series[ticker]
+        iso = day.isoformat()
+        index = bisect_left(dates, iso)
+        return closes[index] if index < len(dates) and dates[index] == iso else None
+
+    def mark_equity(self, day: date) -> float:
+        return self.cash + sum(
+            _leg_value(position, self.close(ticker, day) or position["entry_price"])
+            for ticker, position in self.positions.items()
+        )
+
+    def _record_exit(self, ticker: str, position: dict, day: date, price: float, reason: str) -> None:
+        pnl = (
+            position["qty"] * (price - position["entry_price"])
+            if position["direction"] == "long"
+            else position["qty"] * (position["entry_price"] - price)
+        )
+        self.cash += pnl if position["direction"] == "short" else position["qty"] * price
+        self.cash -= position["qty"] * price * self.config.cost_rate
+        self.trades.append({
+            "date": day,
+            "ticker": ticker,
+            "side": "cover" if position["direction"] == "short" else "sell",
+            "quantity": position["qty"],
+            "price": price,
+            "value": abs(position["qty"] * price),
+            "reason": reason,
+            "pnl": pnl,
+        })
+        del self.positions[ticker]
+
+    def _close_stale_position(self, ticker: str, position: dict, day: date) -> None:
+        last_iso = self.series[ticker][0][-1]
+        if last_iso >= day.isoformat() or (day - date.fromisoformat(last_iso)).days <= _STALE_EXIT_DAYS:
+            return
+        last_price = self.close(ticker, day) or position["entry_price"]
+        self._record_exit(ticker, position, day, last_price, "data ended (halt/delisting)")
+        self.warnings.append(
+            f"{ticker}: price history ends {last_iso} mid-window; position closed at the "
+            "last available price (real delisting proceeds may differ)."
+        )
+
+    def _exit_reason(self, ticker: str, position: dict, day: date, signal_day: date, price: float) -> str | None:
+        gain = (
+            price / position["entry_price"] - 1
+            if position["direction"] == "long"
+            else position["entry_price"] / price - 1
+        )
+        held = (day - position["entry_date"]).days
+        if gain >= self.config.take_profit:
+            return f"take-profit +{self.config.take_profit * 100:.0f}%"
+        if gain <= -self.config.stop_loss:
+            return f"stop-loss -{self.config.stop_loss * 100:.0f}%"
+        if held >= self.config.max_hold:
+            return f"max-hold {self.config.max_hold}d"
+        is_eligible, _score, _direction = eligible(
+            self.config.category,
+            self.config.params,
+            ticker,
+            signal_day,
+            *self.series[ticker],
+        )
+        return None if is_eligible else "criteria exit"
+
+    def exit_positions(self, day: date, signal_day: date) -> None:
+        for ticker in list(self.positions):
+            position = self.positions[ticker]
+            price = self.bar_on(ticker, day)
+            if price is None:
+                self._close_stale_position(ticker, position, day)
+                continue
+            reason = self._exit_reason(ticker, position, day, signal_day, price)
+            if reason:
+                self._record_exit(ticker, position, day, price, reason)
+
+    def _entry_candidates(self, day: date, signal_day: date) -> list[tuple[float, str, str, float]]:
+        members = self.membership_on(day) if self.membership_on is not None else None
+        candidates = []
+        for ticker, (dates, closes) in self.series.items():
+            if ticker in self.positions or (members is not None and ticker not in members):
+                continue
+            is_eligible, score, direction = eligible(
+                self.config.category,
+                self.config.params,
+                ticker,
+                signal_day,
+                dates,
+                closes,
+            )
+            fill_price = self.bar_on(ticker, day)
+            if is_eligible and fill_price is not None and fill_price > 0:
+                candidates.append((score, ticker, direction, fill_price))
+        return sorted(candidates, key=lambda candidate: candidate[0], reverse=True)
+
+    def enter_positions(self, day: date, signal_day: date) -> None:
+        if len(self.positions) >= self.config.top_n:
+            return
+        target = max(0.0, self.mark_equity(day)) / self.config.top_n
+        for _score, ticker, direction, price in self._entry_candidates(day, signal_day):
+            if len(self.positions) >= self.config.top_n:
+                break
+            dollars = target if direction == "short" else min(target, self.cash)
+            if dollars <= 1:
+                continue
+            quantity = dollars / price
+            self.cash -= dollars if direction == "long" else 0.0
+            self.cash -= dollars * self.config.cost_rate
+            self.positions[ticker] = {
+                "qty": quantity,
+                "direction": direction,
+                "entry_price": price,
+                "entry_date": day,
+            }
+            self.trades.append({
+                "date": day,
+                "ticker": ticker,
+                "side": "short" if direction == "short" else "buy",
+                "quantity": quantity,
+                "price": price,
+                "value": dollars,
+                "reason": "criteria met",
+            })
+
+    def mark_day(self, day: date) -> None:
+        point = {"date": day, "cash": self.cash, "equity": self.mark_equity(day)}
+        if self.benchmark_first:
+            benchmark_close = factors.close_at(self.benchmark_dates, self.benchmark_closes, day)
+            point["benchmark_equity"] = self.starting_cash * (
+                (benchmark_close or self.benchmark_first) / self.benchmark_first
+            )
+        self.equity_curve.append(point)
+
+    def run(self, calendar: list[date]) -> None:
+        for day in calendar:
+            signal_day = day - timedelta(days=1)
+            self.exit_positions(day, signal_day)
+            self.enter_positions(day, signal_day)
+            self.mark_day(day)
+
+
 def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date, end_date: date,
                         starting_cash: float, transaction_cost_bps: float = 5.0,
                         slippage_bps: float = 5.0, benchmark: str = "SPY", membership_on=None,
@@ -397,206 +660,63 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
     via ``_ENGINE_LOCK`` and memory-lean (compact price arrays)."""
     if end_date <= start_date:
         raise ValidationError("Backtest end_date must be after start_date")
-    category = strategy.get("category") or "short_term"
-    params = strategy.get("parameters", {}) or {}
     universe = sorted({t.strip().upper() for t in (universe or []) if t and t.strip()})
     if not universe:
         raise ValidationError("Active screening needs a non-empty universe")
 
-    cost_rate = (transaction_cost_bps + slippage_bps) / 10000
-    top_n = _max_positions(category, params)
-    if category != "risk_rotation":
-        try:
-            top_n = max(1, int(params.get("max_positions") or 15))
-        except (TypeError, ValueError):
-            top_n = 15
-    take_profit = _pct(params.get("take_profit_pct") or params.get("take_profit"), 0.25)
-    stop_loss = _pct(params.get("stop_loss_pct") or params.get("stop_loss"), 0.12)
-    max_hold = int(params.get("max_hold_days") or 252)
+    config = _active_config(strategy, transaction_cost_bps, slippage_bps)
     warnings: list[str] = []
     if membership_on is None and universe_kind == "index":
         warnings.append(_UNIVERSE_CAVEAT)
     warmup_start = date(max(1962, start_date.year - 2), 1, 1)
 
-    # Only one heavy universe scan at a time — prevents concurrent requests / the live-mark
-    # tick from stacking memory and OOM-killing the instance.
     with _ENGINE_LOCK:
-        series: dict[str, tuple[list[str], list[float]]] = {}
-        for t in universe:
-            if _is_dead(t):
-                continue  # known no-data symbol — don't re-fetch corpses
-            try:
-                dates, closes = _load_series(t, warmup_start, end_date)
-                if closes:
-                    series[t] = (dates, closes)
-            except Exception:  # noqa: BLE001 — symbol won't resolve (often delisted) → skiplist it
-                _mark_dead(t)
-                continue
-        if not series:
-            raise ValidationError("No price history available for the universe in this window")
-        # Coverage disclosure — a run over a silently truncated universe looks identical
-        # to a full one, so say exactly how many names couldn't be priced.
-        missing = [t for t in universe if t not in series]
-        if missing:
-            shown = ", ".join(missing[:8]) + ("…" if len(missing) > 8 else "")
-            warnings.append(
-                f"{len(missing)} of {len(universe)} universe names had no loadable price "
-                f"history in this window (delisted or provider gaps): {shown}")
-
-        bench_dates: list[str] = []
-        bench_closes: list[float] = []
-        if benchmark:
-            try:
-                bench_dates, bench_closes = _load_series(benchmark, warmup_start, end_date)
-            except Exception:  # noqa: BLE001
-                warnings.append(f"Benchmark {benchmark.upper()} history was unavailable for this window.")
-
-        s_iso, e_iso = start_date.isoformat(), end_date.isoformat()
-        cal_set = {ds for (dates, _) in series.values() for ds in dates if s_iso <= ds <= e_iso}
-        calendar = [date.fromisoformat(ds) for ds in sorted(cal_set)]
-        if len(calendar) < 2:
-            raise ValidationError("Not enough trading days in the window")
-        bench_first = factors.close_at(bench_dates, bench_closes, calendar[0]) if bench_closes else None
-
-        def close(sym: str, d):
-            ds, cs = series[sym]
-            return factors.close_at(ds, cs, d)
-
-        def bar_on(sym: str, d) -> float | None:
-            """Close only if the ticker actually traded on day d — fills and price-
-            triggered exits must never execute at a stale carried-forward close."""
-            ds, cs = series[sym]
-            iso = d.isoformat()
-            i = bisect_left(ds, iso)
-            return cs[i] if i < len(ds) and ds[i] == iso else None
-
-        cash = float(starting_cash)
-        positions: dict[str, dict] = {}
-        trades: list[dict] = []
-        equity_curve: list[dict] = []
-
-        def mark_equity(d) -> float:
-            return cash + sum(_leg_value(p, (close(t, d) or p["entry_price"])) for t, p in positions.items())
-
-        for d in calendar:
-            # Signal cutoff: decisions made *today* may only see data through *yesterday*.
-            # (Take-profit/stop-loss are price-triggered: the trigger and the fill are the
-            # same observed close, so they evaluate on today's price without leaking.)
-            sig = d - timedelta(days=1)
-
-            # 1) Exits — take-profit / stop-loss / max-hold / criteria-break, whichever first.
-            for t in list(positions):
-                p = positions[t]
-                px = bar_on(t, d)
-                if px is None:
-                    # No bar today. If the series has ENDED (halt/delisting), force-close at
-                    # the last available close with an explicit reason — never freeze the
-                    # position at a stale price until max-hold reports a fake ~0% exit.
-                    last_iso = series[t][0][-1]
-                    if last_iso < d.isoformat() and (d - date.fromisoformat(last_iso)).days > _STALE_EXIT_DAYS:
-                        last_px = close(t, d) or p["entry_price"]
-                        pnl = (p["qty"] * (last_px - p["entry_price"]) if p["direction"] == "long"
-                               else p["qty"] * (p["entry_price"] - last_px))
-                        cash += pnl if p["direction"] == "short" else p["qty"] * last_px
-                        cash -= p["qty"] * last_px * cost_rate
-                        trades.append({"date": d, "ticker": t,
-                                       "side": "cover" if p["direction"] == "short" else "sell",
-                                       "quantity": p["qty"], "price": last_px, "value": abs(p["qty"] * last_px),
-                                       "reason": "data ended (halt/delisting)", "pnl": pnl})
-                        warnings.append(
-                            f"{t}: price history ends {last_iso} mid-window; position closed at the "
-                            "last available price (real delisting proceeds may differ).")
-                        del positions[t]
-                    continue
-                gain = (px / p["entry_price"] - 1) if p["direction"] == "long" else (p["entry_price"] / px - 1)
-                held = (d - p["entry_date"]).days
-                reason = None
-                if gain >= take_profit:
-                    reason = f"take-profit +{take_profit * 100:.0f}%"
-                elif gain <= -stop_loss:
-                    reason = f"stop-loss -{stop_loss * 100:.0f}%"
-                elif held >= max_hold:
-                    reason = f"max-hold {max_hold}d"
-                else:
-                    ok, _, _ = eligible(category, params, t, sig, *series[t])
-                    if not ok:
-                        reason = "criteria exit"
-                if reason:
-                    pnl = (p["qty"] * (px - p["entry_price"]) if p["direction"] == "long"
-                           else p["qty"] * (p["entry_price"] - px))
-                    cash += pnl if p["direction"] == "short" else p["qty"] * px
-                    cash -= p["qty"] * px * cost_rate
-                    trades.append({"date": d, "ticker": t, "side": "cover" if p["direction"] == "short" else "sell",
-                                   "quantity": p["qty"], "price": px, "value": abs(p["qty"] * px),
-                                   "reason": reason, "pnl": pnl})
-                    del positions[t]
-
-            # 2) Entries — fill free slots with the best names that qualified as of
-            #    yesterday's data, paying today's close (next-bar execution).
-            if len(positions) < top_n:
-                equity_now = mark_equity(d)
-                target = max(0.0, equity_now) / top_n
-                members = membership_on(d) if membership_on is not None else None
-                cands = []
-                for t, (dates, closes) in series.items():
-                    if t in positions:
-                        continue
-                    if members is not None and t not in members:
-                        continue  # not in the index on this date (point-in-time membership)
-                    ok, score, direction = eligible(category, params, t, sig, dates, closes)
-                    if not ok:
-                        continue
-                    fill_px = bar_on(t, d)
-                    if fill_px is None or fill_px <= 0:
-                        continue  # the ticker didn't trade today — no fill at a stale close
-                    cands.append((score, t, direction, fill_px))
-                cands.sort(key=lambda x: x[0], reverse=True)
-                for score, t, direction, px in cands:
-                    if len(positions) >= top_n:
-                        break
-                    dollars = target if direction == "short" else min(target, cash)
-                    if dollars <= 1 or px <= 0:
-                        continue
-                    qty = dollars / px
-                    cash -= dollars if direction == "long" else 0.0
-                    cash -= dollars * cost_rate
-                    positions[t] = {"qty": qty, "direction": direction, "entry_price": px, "entry_date": d}
-                    trades.append({"date": d, "ticker": t, "side": "short" if direction == "short" else "buy",
-                                   "quantity": qty, "price": px, "value": dollars, "reason": "criteria met"})
-
-            # 3) Mark net liquidation.
-            eq = mark_equity(d)
-            point = {"date": d, "cash": cash, "equity": eq}
-            if bench_first:
-                bclose = factors.close_at(bench_dates, bench_closes, d)
-                point["benchmark_equity"] = starting_cash * ((bclose or bench_first) / bench_first)
-            equity_curve.append(point)
+        series, benchmark_dates, benchmark_closes = _load_active_market_data(
+            universe, warmup_start, end_date, benchmark, warnings,
+        )
+        calendar = _active_calendar(series, start_date, end_date)
+        simulation = _ActiveSimulation(
+            config=config,
+            series=series,
+            starting_cash=starting_cash,
+            membership_on=membership_on,
+            benchmark_dates=benchmark_dates,
+            benchmark_closes=benchmark_closes,
+            first_day=calendar[0],
+            warnings=warnings,
+        )
+        simulation.run(calendar)
 
         last_day = calendar[-1]
         final_holdings = [{
             "ticker": t, "quantity": p["qty"], "direction": p["direction"],
-            "entry_price": p["entry_price"], "last_close": (close(t, last_day) or p["entry_price"]),
-        } for t, p in positions.items()]
-        final_equity = equity_curve[-1]["equity"] if equity_curve else starting_cash
-        holdings = [{"ticker": t, "weight": round(abs(_leg_value(p, (close(t, last_day) or p["entry_price"]))) / final_equity, 4)}
-                    for t, p in positions.items() if final_equity] or [{"ticker": "Cash", "weight": 1.0}]
-        if not trades:
+            "entry_price": p["entry_price"],
+            "last_close": simulation.close(t, last_day) or p["entry_price"],
+        } for t, p in simulation.positions.items()]
+        final_equity = simulation.equity_curve[-1]["equity"] if simulation.equity_curve else starting_cash
+        holdings = [{
+            "ticker": t,
+            "weight": round(abs(_leg_value(
+                p, simulation.close(t, last_day) or p["entry_price"],
+            )) / final_equity, 4),
+        } for t, p in simulation.positions.items() if final_equity] or [{"ticker": "Cash", "weight": 1.0}]
+        if not simulation.trades:
             warnings.append("No candidate met the model's criteria in this window — the model stayed in cash.")
 
         return {
             "strategy": strategy,
             "served_by": "store",
-            "trades": trades,
-            "equity_curve": equity_curve,
-            "metrics": summarize(equity_curve, trades, starting_cash),
+            "trades": simulation.trades,
+            "equity_curve": simulation.equity_curve,
+            "metrics": summarize(simulation.equity_curve, simulation.trades, starting_cash),
             "warnings": warnings,
             "holdings": holdings,
             "final_holdings": final_holdings,
-            "residual_cash": cash,
+            "residual_cash": simulation.cash,
             "date_range": {"start": start_date, "end": end_date},
             "integrity": build_integrity(
                 mode="active_screen",
-                uses_fundamentals=uses_fundamentals(category, params),
+                uses_fundamentals=uses_fundamentals(config.category, config.params),
                 membership_pit=(None if universe_kind == "fixed"
                                 else membership_on is not None),
                 transaction_cost_bps=transaction_cost_bps,
