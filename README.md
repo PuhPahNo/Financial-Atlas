@@ -23,8 +23,8 @@ The user-facing product name is **Atlas**. The repository and internal docs stil
   parameter sweeps, and documented caveats for free-data limitations.
 - **Research assistant**: assistant sessions with confirmed tool actions for local Atlas workflows
   when `OPENAI_API_KEY` is configured.
-- **Hosted app controls**: login/session auth, edit gates, assistant/paper-trading rate limits, and
-  Render deployment config for a private single-tenant deployment.
+- **Hosted app controls**: public read-only research, login/session gates for user-owned or mutating
+  workflows, assistant/paper-trading rate limits, and a single-tenant Render deployment.
 
 Deployment to **Render** is wired for one Docker web service plus managed Postgres. The container
 runs the Next.js frontend on Render's public port and the FastAPI backend privately on
@@ -95,8 +95,7 @@ is fine. See [docs/prd/30-deployment-render.md](docs/prd/30-deployment-render.md
 ## Tests
 
 ```bash
-make test
-cd frontend && npm run build
+make verify  # lint + TypeScript + backend tests/coverage + duplicate scan + production build
 ```
 
 ## Known limitations / future work

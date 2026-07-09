@@ -1,92 +1,75 @@
 # 07 — Testing & Quality Strategy
 
-> Parent: [00-master-prd.md](00-master-prd.md) · How we keep a multi-source, multi-model platform
-> correct and maintainable.
+> Parent: [00-master-prd.md](00-master-prd.md) · The quality gate that exists today and the gaps we
+> still need to close.
 
-## 1. Purpose / why
+## 1. Purpose
 
-Define the test pyramid, the special rigor for valuation math and data normalization, CI gates, and
-the Pragmatic Programmer practices (assertions, Design by Contract, tracer bullets) that keep the
-codebase trustworthy as it grows.
+Keep valuation math, data normalization, migrations, API contracts, and production builds safe to
+refactor. This document describes current enforcement; proposed tooling is labeled as future work.
 
-## 2. User stories & acceptance criteria
+## 2. Current acceptance criteria
 
-- *As the maintainer,* a wrong valuation formula fails CI. **AC:** valuation unit tests assert against
-  hand-computed reference values within ±0.5%.
-- *As the maintainer,* a provider returning bad data fails fast. **AC:** contract tests reject
-  non-conforming provider output before it reaches a service.
-- *As the maintainer,* I can refactor a provider without breaking the UI. **AC:** API contract tests
-  + e2e smoke stay green.
+- A valuation formula regression fails a hand-computed pytest assertion.
+- Provider normalization and fallback behavior are exercised with deterministic fakes.
+- API, auth, paper-trading, migration, cache, and backtest contracts run against an isolated temp
+  SQLite database and cache.
+- `make verify` must pass before a production push.
 
-## 3. Scope (in / out)
+## 3. Current test layers
 
-- **In:** test types/layers, fixtures strategy, CI, lint/format/type gates, DBC & assertion policy.
-- **Out:** per-feature acceptance criteria (each feature PRD's §2 and §10).
-
-## 4. Test pyramid
-
-| Layer | Tooling | What it covers |
+| Layer | Current tooling | Coverage |
 | --- | --- | --- |
-| **Unit** | pytest | valuation engine (pure fns), normalization maps, formatters, derived metrics |
-| **Contract — providers** | pytest + recorded fixtures (VCR-style) | every provider satisfies `ProviderProtocol` postconditions ([02 §4](02-data-sources.md)) |
-| **Contract — API** | pytest + httpx | responses validate against Pydantic models + error mapping ([04](04-api-contract.md)) |
-| **Integration** | pytest + temp SQLite/Postgres | service → cache → DB → derived path; fallback engine; rate limiter |
-| **Frontend unit/component** | Vitest + React Testing Library | `MetricCard`, `FinancialTable`, `StateView` incl. null/stale states |
-| **E2E smoke** | Playwright | search → overview → financials → valuation render real (fixtured) data |
+| Unit/domain | pytest | valuation, metrics, matching, market hours, factors, validation |
+| API/contract | FastAPI `TestClient` + pytest | envelopes, errors, auth, CRUD, queue lifecycle |
+| Integration | pytest + temp SQLite/cache | services, persistence, migrations, fallback paths |
+| Frontend static | ESLint + strict TypeScript | unused code, type and framework checks |
+| Build | Next.js production build | route compilation and server/client boundaries |
+| Structural | jscpd | repeated Python/TypeScript/TSX/CSS blocks |
 
-Paper trading adds deterministic tests around strategy CRUD, backtest accounting, portfolio fills,
-and assistant tool confirmation. Backtests use tiny fixture price series before live provider data.
+Backtest HTTP tests inject the deterministic fixture executor in test code. The public API cannot
+select fixture data. Engine tests may call that internal fixture mode directly.
 
-Most tests are fast and offline (recorded fixtures). A small, **opt-in** "live" suite hits real
-providers nightly to detect upstream schema drift (kept out of the main CI gate).
+## 4. Enforced local gate
 
-## 5. Valuation engine — special rigor
+`make verify` currently runs:
 
-The engine is pure and the riskiest correctness surface, so it gets the deepest tests:
-- Each model (DCF, owner earnings, multiples, DDM, blended, MoS) has worked-example tests with
-  hand-computed expected outputs ([14](14-valuation-engine.md)).
-- Property tests: higher discount rate ⇒ lower DCF value; MoS sign matches price-vs-fair-value;
-  blended value lies within [min, max] of component values.
-- Edge cases: negative FCF, zero/negative earnings, `discount_rate ≤ terminal_growth` (must error,
-  not divide-by-near-zero).
+1. Ruff and ESLint with zero warnings.
+2. TypeScript `--noEmit` with unused locals/parameters enabled.
+3. The full pytest suite with a 68% aggregate coverage floor.
+4. jscpd with a 1.4% failure threshold (currently zero detected clones).
+5. A Next.js production build.
 
-## 6. Data normalization — special rigor
+The gate is local and is also run before direct pushes to `main`. A hosted GitHub Actions workflow is
+not installed, so the repository must not claim that PR checks enforce it automatically.
 
-- EDGAR XBRL tag normalization tested against ≥3 real companies with differing tag usage ([02 §9](02-data-sources.md)).
-- Raw-vs-derived separation enforced by tests: derived values never write to statement tables ([03 §6](03-data-model.md)).
-- Provenance assertion: every persisted fact row has `source` + `fetched_at`.
+## 5. Production proof
 
-## 7. Design by Contract & assertive programming
+Render startup is the current Postgres migration integration lane. After each production-affecting
+push, verify the exact live commit, startup/migration logs, `/health`, authenticated API smoke calls,
+and the relevant browser flows. These checks complement tests; they are not represented as a local
+test result.
 
-- Provider methods, API endpoints, and valuation functions declare pre/postconditions; violations
-  raise typed errors (not silent bad data).
-- Boundary assertions validate all external input (provider responses, request params) via Pydantic.
-- Internal invariants (e.g. limiter cap, blended-value bounds) guarded by assertions in dev/test.
+## 6. Known gaps
 
-## 8. CI gates
+- No frontend component/unit runner is installed.
+- No checked-in Playwright end-to-end suite exists.
+- No hosted Postgres service-container test runs on pull requests.
+- No scheduled live-provider drift suite exists.
+- Python static typing and a dedicated import-direction rule are not yet enforced.
 
-On every PR: `lint` (ruff/eslint) · `format` check (ruff format/prettier) · `type` (mypy/tsc) ·
-`unit` · `contract` · `integration` (SQLite + Postgres) · `e2e smoke`. Import-direction guard from
-[01 §5](01-architecture.md). Coverage reported (no hard % gate initially; valuation engine expected
-near-100%).
+Add these only with real tests and wiring; do not list aspirational tools as completed gates.
 
-## 9. Dependencies
+## 7. Fixtures and safety
 
-Every PRD references this for its §10 testing requirements; [01](01-architecture.md) (layers),
-[02](02-data-sources.md)/[04](04-api-contract.md) (contracts).
+- Tests set `DATABASE_URL` and `CACHE_DIR` before importing the app so they cannot mutate the dev DB
+  or cache.
+- Network behavior is replaced with fakes/monkeypatches where determinism matters.
+- Migration tests cover idempotence and fail-closed destructive preconditions.
+- Time-sensitive behavior should receive explicit dates or patched clocks.
 
-## 10. Edge cases & fixtures
+## 8. Done criteria
 
-- Fixtures are real recorded responses (anonymized keys) checked into `tests/fixtures/`, refreshed via
-  a documented script — so tests are deterministic and offline.
-- Time-dependent tests inject a fixed clock (no wall-clock flakiness).
-
-## 11. Open questions & assumptions
-
-- Postgres-in-CI via service container (assume yes). Live-provider nightly suite optional in Phase 2,
-  valuable by Phase 5.
-
-## 12. Done criteria
-
-- Tracer bullet: CI runs unit + one provider contract test + API contract test + e2e smoke green on
-  the Phase 2 slice. → Thicken per feature phase.
+The current slice is done when `make verify` is green and the changed production surface is proven
+on the deployed commit. Future hosted CI/E2E work is done only when its configuration and tests are
+actually checked in and running.

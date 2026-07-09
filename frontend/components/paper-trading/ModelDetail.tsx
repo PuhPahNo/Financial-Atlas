@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { runBacktestAndWait } from "@/lib/paperTradingApi";
-import { Btn, CatDot, IconBtn, MetricTile } from "./ptkit";
+import { Btn, CatDot, DetailBody, DetailFooter, DetailHeader, DetailShell, IconBtn, MetricTile } from "./ptkit";
 import { AreaChart, Donut, DONUT_PALETTE, drawdownOf, equityChartPoints, Pt } from "./ptcharts";
 import { fmt, CatMeta, Model, defaultBacktestWindow, metricStateLabel, metricStateTip } from "./ptdata";
 
@@ -62,25 +62,22 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
   const up = totalRet >= 0;
 
   return (
-    <div style={{ padding: "0 0 32px" }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface-1)", borderBottom: "1px solid var(--border)", padding: "20px 24px 18px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <CatDot hue={cat.hue} />
-              <span className="eyebrow" style={{ color: "var(--text-2)" }}>{cat.label}</span>
-              <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: model.author === "You" ? "var(--accent-2)" : "var(--text-3)", background: model.author === "You" ? "var(--accent-soft)" : "var(--surface-3)" }}>
-                {model.author === "You" ? "Custom build" : "Atlas model"}</span>
-              <span title={metricStateTip(model)} style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: model.backtested ? "var(--pos)" : "var(--text-3)", background: model.backtested ? "var(--pos-soft)" : "var(--surface-3)" }}>
-                {metricStateLabel(model)}</span>
-            </div>
-            <h2 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600, lineHeight: 1.1 }}>{model.name}</h2>
+    <DetailShell>
+      <DetailHeader onClose={onClose}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <CatDot hue={cat.hue} />
+            <span className="eyebrow" style={{ color: "var(--text-2)" }}>{cat.label}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: model.author === "You" ? "var(--accent-2)" : "var(--text-3)", background: model.author === "You" ? "var(--accent-soft)" : "var(--surface-3)" }}>
+              {model.author === "You" ? "Custom build" : "Atlas model"}</span>
+            <span title={metricStateTip(model)} style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 999, color: model.backtested ? "var(--pos)" : "var(--text-3)", background: model.backtested ? "var(--pos-soft)" : "var(--surface-3)" }}>
+              {metricStateLabel(model)}</span>
           </div>
-          <IconBtn icon="x" onClick={onClose} title="Close" />
+          <h2 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600, lineHeight: 1.1 }}>{model.name}</h2>
         </div>
-      </div>
+      </DetailHeader>
 
-      <div style={{ padding: "22px 24px", display: "flex", flexDirection: "column", gap: 26 }}>
+      <DetailBody gap={26}>
         <p style={{ margin: 0, fontSize: 14.5, color: "var(--text-2)", lineHeight: 1.5 }}>{model.tagline}</p>
 
         <div>
@@ -149,13 +146,13 @@ export default function ModelDetail({ model, cat, onClose, onEdit, onBacktest, o
             </div>
           </div>
         </section>
-      </div>
+      </DetailBody>
 
-      <div style={{ position: "sticky", bottom: 0, background: "linear-gradient(transparent, var(--surface-1) 22%)", padding: "18px 24px", display: "flex", gap: 10 }}>
+      <DetailFooter>
         <Btn variant="primary" icon="play" iconFill onClick={() => onBacktest(model)} style={{ flex: 1 }}>Backtest in lab</Btn>
         {model.author === "You" && <Btn variant="soft" icon="edit" onClick={() => onEdit(model)}>Tune</Btn>}
         {model.author === "You" && <IconBtn icon="trash" size={42} tone="danger" title="Archive model" onClick={() => onDelete(model)} />}
-      </div>
-    </div>
+      </DetailFooter>
+    </DetailShell>
   );
 }

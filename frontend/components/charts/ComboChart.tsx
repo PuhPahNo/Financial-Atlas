@@ -30,7 +30,15 @@ export default function ComboChart({
         <Tooltip
           contentStyle={TOOLTIP_STYLE}
           cursor={{ fill: "rgba(255,255,255,0.04)" }}
-          formatter={(v: any, name: string) => [typeof v === "number" ? (lines.some((l) => l.name === name) ? rf(v) : leftFmt(v)) : v, name]}
+          formatter={(value, name) => {
+            const label = name ?? "";
+            return [
+              typeof value === "number"
+                ? (lines.some((line) => line.name === label) ? rf(value) : leftFmt(value))
+                : value ?? "",
+              label,
+            ];
+          }}
         />
         <Legend wrapperStyle={{ fontSize: 12, color: "#8c8a99" }} iconType="circle" />
         {bars.map((b, i) => (

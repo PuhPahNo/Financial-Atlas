@@ -1,90 +1,84 @@
 # 30 — Deployment to Render
 
-> Parent: [00-master-prd.md](00-master-prd.md) · The local→hosted path. Configuration-driven, no
-> rewrite ([01 §6](01-architecture.md)).
+> Parent: [00-master-prd.md](00-master-prd.md) · The production shape that is actually deployed.
 
-## 1. Purpose / why
+## 1. Purpose
 
-Take the local-first app to a hosted **Render** web service when ready: Postgres instead of SQLite,
-scheduled jobs as Render Cron, secrets in Render env groups, and a repeatable deploy — changing
-configuration, not code.
+Run the local-first app as one single-tenant Render service backed by managed Postgres and a
+persistent cache disk, with repeatable `main`-branch deploys and fail-closed startup migrations.
 
-## 2. User stories & acceptance criteria
+## 2. Current topology
 
-- *As the owner,* I deploy to Render and reach the app at a URL. **AC:** frontend + backend served on
-  Render; a known ticker flows end-to-end against Postgres.
-- *As the owner,* data refreshes run on schedule in prod. **AC:** Render Cron Jobs invoke the same job
-  functions as local ([05](05-caching-and-jobs.md)).
-- *As the maintainer,* no secret is in git. **AC:** all keys/URLs come from Render env groups; repo has
-  only `.env.example`.
-
-## 3. Scope (in / out)
-
-- **In:** Render service topology, Postgres provisioning + migration, env/secrets, cron jobs, build/
-  deploy pipeline, cache backend in prod, basic auth decision.
-- **Out:** multi-region/scaling (post-v1); the app features themselves.
-
-## 4. Target topology on Render
-
-| Render resource | Role |
+| Resource | Role |
 | --- | --- |
-| **Web Service — backend** | FastAPI (uvicorn/gunicorn); serves `/api/v1` |
-| **Web Service / Static — frontend** | Next.js app calling the backend |
-| **Postgres** | managed DB (replaces SQLite via `DATABASE_URL`) |
-| **Cron Jobs** | invoke `jobs/` functions (`refresh_prices`, `refresh_fundamentals`, `refresh_filings`, `recompute_valuations`) |
-| **Disk / Key-Value** | response cache backend ([05](05-caching-and-jobs.md)) |
-| **Env group** | all `*_API_KEY`, `DATABASE_URL`, config |
+| Docker web service | Next.js on Render's public `$PORT`; FastAPI privately on `127.0.0.1:8000` |
+| Managed Postgres | application persistence via `DATABASE_URL` |
+| Persistent disk | bounded provider cache and durable price data under `/var/data` |
+| In-process workers | queued backtests, live account marks, nightly data maintenance |
+| Render environment | credentials, provider keys, database URL, and runtime configuration |
 
-Defined as a **Render Blueprint** (`infra/render.yaml`) so the topology is reproducible
-infrastructure-as-code.
+The service is provisioned manually. `infra/render.yaml` is a reviewed reference for the same shape,
+not evidence that a Blueprint owns the live resources.
 
-## 5. Contracts (config switches only)
+## 3. Runtime contract
 
-- `DATABASE_URL` → Postgres; the tracked application migrations run during backend startup
-  ([03 §7](03-data-model.md)).
-- `CACHE_BACKEND` → Render Disk or Key-Value ([05](05-caching-and-jobs.md)).
-- `JOB_SCHEDULER` → Render Cron (local was in-process APScheduler).
-- **Invariant:** application code is identical local vs Render; only env/config differs ([01 §6](01-architecture.md)).
+- `scripts/render-start.sh` starts private FastAPI and public Next.js in the same container.
+- `DATABASE_URL` selects Postgres; local development defaults to SQLite.
+- `CACHE_DIR=/var/data/cache`, `CACHE_MAX_MB`, and `CACHE_MIN_FREE_MB` bound disk usage and preserve
+  free space for Postgres-adjacent durable data.
+- FastAPI startup creates missing tables, reconciles additive columns, then runs the ordered
+  `atlas_schema_migrations` revisions transactionally.
+- Destructive migrations validate production data and raise before DDL when a precondition fails.
+- `DATA_MAINTENANCE_*` and `LIVE_MARK_*` control the in-process loops. No Render Cron Job is required.
 
-## 6. Migration path (SQLite → Postgres)
+## 4. Deploy flow
 
-1. Provision Render Postgres; set `DATABASE_URL` in the env group.
-2. Start the backend; tracked migrations apply transactionally before the health check passes.
-3. Optional one-time data backfill (or just let refresh jobs repopulate from EDGAR — preferred, since
-   the DB is a cache of public data).
+1. Run `make verify` locally.
+2. Push the reviewed commit to `main`.
+3. Render builds a replacement container from that exact commit.
+4. Startup migrations finish before the health check can pass.
+5. Render switches traffic only after the new instance is healthy; a startup failure leaves the
+   previous instance available.
 
-## 7. CI/CD
+## 5. Authentication boundary
 
-- Run `make verify`, push `main`, then Render builds and starts the replacement instance. Migrations
-  run before the backend health check; failed startup leaves the previous instance live.
-- Health check endpoint gates the deploy; rollback on failed health check.
+The deployment has one owner. Read-only company/market research remains public. Login is required
+for user-owned or mutating workflows: paper trading, backtests, assistant sessions, watchlists,
+screener workspace operations, and custom valuation writes. `AUTH_REQUIRED=true` and non-default
+production credentials are mandatory. See [ADR 0004](../adr/0004-single-tenant-authorization-boundary.md).
 
-## 8. Auth decision (open)
+## 6. Required configuration
 
-Single-tenant today (`user_id='local'`). For public hosting, choose:
-- **(a)** keep it private (single user, IP/basic-auth) — simplest; or
-- **(b)** add real accounts (auth provider + `user_id` FKs on watchlists/screens).
-Decision deferred to when hosting is actually pursued; **assume (a)** for first deploy.
+- Required: `DATABASE_URL`, `BACKEND_URL=http://127.0.0.1:8000`, `ENV=production`,
+  `SEC_USER_AGENT`, `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SECRET`.
+- Persistent cache: `CACHE_DIR`, `CACHE_MAX_MB`, `CACHE_MIN_FREE_MB`.
+- Optional providers: `OPENAI_API_KEY`, `FMP_API_KEY`, `FINNHUB_API_KEY`, `FRED_API_KEY`, and the
+  other variables documented in `backend/.env.example`.
 
-## 9. Dependencies
+Secrets live in Render; committed config contains no values.
 
-[01](01-architecture.md) (config), [03](03-data-model.md) (Postgres parity), [05](05-caching-and-jobs.md)
-(cron + cache), [07](07-testing-and-quality.md) (both-engine CI).
+## 7. Production verification
 
-## 10. Edge cases & error handling
+For every production-affecting push:
 
-- Free-tier Render sleep/cold starts → background jobs keep cache warm; health check tolerant of cold
-  start. Provider keys missing in env → provider self-disables ([01 §7](01-architecture.md)), logged.
-- Postgres connection limits → pooled sessions in `core/`.
+- Confirm Render's live deployment commit equals the pushed `main` commit.
+- Inspect startup and migration logs for errors.
+- Check `/health`, login, protected-route rejection, representative research/provider APIs,
+  strategies, accounts, backtests, watchlists, and browser console errors.
+- Exercise only read-only production calls unless a mutation was explicitly authorized.
 
-## 11. Testing requirements
+Render startup is the current Postgres migration proof. There is no hosted preview/staging service or
+Postgres CI lane today; [07](07-testing-and-quality.md) records that gap.
 
-- Migrations green on Postgres in CI; smoke test against a Render preview/staging; cron job invocation
-  test (job runs idempotently in the hosted env).
+## 8. Edge cases
 
-## 12. Done criteria
+- Cold starts may delay the first request; health and smoke checks should retry during cutover.
+- Provider keys are optional and unavailable sources degrade with explicit warnings.
+- Cache pruning reserves disk space before writes and retries after pruning.
+- Queued jobs interrupted by a deploy are marked failed on boot and can be rerun.
 
-- App reachable on a Render URL serving the full flows against Postgres, with cron-driven refresh and
-  all secrets in env groups — achieved by config, not code changes.
+## 9. Done criteria
 
-> Note: provisioning can use the Render tooling available in this environment when this phase begins.
+The exact pushed commit is live, migrations completed, health is green, authenticated and public
+read paths work, background pipelines show no startup errors, and the relevant browser flows have no
+regression.

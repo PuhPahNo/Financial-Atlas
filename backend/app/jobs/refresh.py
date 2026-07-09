@@ -2,8 +2,8 @@
 
 Recomputes the stored snapshot for every ticker in the local dataset (which
 includes everything watchlisted or screened). Idempotent and resumable: one bad
-ticker is logged and skipped. Runs locally via APScheduler or, in production, as
-a Render Cron Job:  `python -m app.jobs.refresh`
+ticker is logged and skipped. This is an on-demand maintenance command:
+`python -m app.jobs.refresh`.
 """
 from __future__ import annotations
 

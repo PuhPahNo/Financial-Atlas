@@ -97,9 +97,10 @@ Single typed settings object (`core/config.py`, Pydantic `BaseSettings`) sourced
 | Setting | Local default | Render |
 | --- | --- | --- |
 | `DATABASE_URL` | `sqlite:///./atlas.db` | Postgres URL (Render-managed) |
-| `CACHE_BACKEND` | `filesystem` (`./.cache`) | Render disk or Key-Value store |
+| `CACHE_DIR` | `backend/.cache` | `/var/data/cache` on the persistent disk |
+| `CACHE_MAX_MB`, `CACHE_MIN_FREE_MB` | bounded filesystem cache | disk-size and free-space guardrails |
 | `*_API_KEY` (per provider) | `.env` (gitignored) | Render env group (secrets) |
-| `JOB_SCHEDULER` | `apscheduler` in-process | Render Cron Job |
+| `DATA_MAINTENANCE_*`, `LIVE_MARK_*` | in-process loops | same single-service loops |
 | `LOG_LEVEL`, `ENV` | `debug`, `local` | `info`, `production` |
 
 No secrets in code or git. `.env.example` documents every variable.
@@ -108,11 +109,12 @@ No secrets in code or git. `.env.example` documents every variable.
 
 - **Errors:** typed exception hierarchy (`ProviderError`, `RateLimitError`, `NotFoundError`,
   `ValidationError`) mapped to the API error model in [04](04-api-contract.md).
-- **Logging:** structured JSON logs with request id + ticker + provider for traceability.
+- **Logging:** named Python loggers for app/jobs/providers plus Render's request logs; never log
+  credentials, cookies, tokens, or provider keys.
 - **Time/units:** store monetary values in reporting currency with an explicit `currency` field;
   store dates as ISO-8601; never mix raw and derived (see [03](03-data-model.md)).
-- **Assertive boundaries:** every provider response is validated against a Pydantic schema before it
-  enters a service — bad data fails fast and loud, never silently propagates.
+- **Assertive boundaries:** provider adapters normalize into typed domain objects and service/API
+  boundaries validate inputs; bad external data is rejected or surfaced as an explicit warning.
 
 ## 8. Dependencies
 
@@ -139,5 +141,6 @@ No secrets in code or git. `.env.example` documents every variable.
 
 ## 12. Done criteria
 
-- Tracer bullet: repo scaffolds, `make dev` runs, health check green, dependency-direction guard
-  enforced in CI. → Thickened as services/providers land in Phase 2.
+- Tracer bullet: repo scaffolds, `make dev` runs, health check green, and `make verify` enforces the
+  current lint/type/test/coverage/duplication/build gate. A dedicated import-direction rule remains
+  future hardening.

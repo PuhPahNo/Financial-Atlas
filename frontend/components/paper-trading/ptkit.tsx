@@ -188,6 +188,33 @@ export function MetricTile({ label, value, tone, big, subtle = false }: {
   );
 }
 
+export function DetailShell({ children }: { children: ReactNode }) {
+  return <div style={{ padding: "0 0 32px" }}>{children}</div>;
+}
+
+export function DetailHeader({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  return (
+    <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface-1)", borderBottom: "1px solid var(--border)", padding: "20px 24px 18px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        {children}
+        <IconBtn icon="x" onClick={onClose} title="Close" />
+      </div>
+    </div>
+  );
+}
+
+export function DetailBody({ children, gap = 24 }: { children: ReactNode; gap?: number }) {
+  return <div style={{ padding: "22px 24px", display: "flex", flexDirection: "column", gap }}>{children}</div>;
+}
+
+export function DetailFooter({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ position: "sticky", bottom: 0, background: "linear-gradient(transparent, var(--surface-1) 22%)", padding: "18px 24px", display: "flex", gap: 10 }}>
+      {children}
+    </div>
+  );
+}
+
 function Backdrop({ onClose, children, align = "flex-end" }: { onClose: () => void; children: ReactNode; align?: string }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();

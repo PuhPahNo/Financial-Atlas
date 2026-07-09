@@ -40,7 +40,7 @@ export default function LoginPage() {
         <div className="mb-6">
           <div className="text-[11px] uppercase tracking-wider text-muted">Atlas account</div>
           <h1 className="mt-2 font-serif text-3xl font-semibold tracking-tight">Sign in</h1>
-          <p className="mt-2 text-sm text-muted">Required for editable workspaces like Paper Trading, Watchlists, and Screener tools.</p>
+          <p className="mt-2 text-sm text-muted">Required for your private Paper Trading, Watchlists, and Screener workspaces.</p>
         </div>
 
         <label className="mb-4 block">

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { paperTradingApi, TraderAccount, AccountPerformance, AccountValue } from "@/lib/paperTradingApi";
 import { etTime, etDate } from "@/lib/datetime";
-import { Btn, IconBtn, Pill, CatDot, Icon, MetricTile } from "./ptkit";
+import { Btn, CatDot, DetailBody, DetailFooter, DetailHeader, DetailShell, Icon, IconBtn, MetricTile, Pill } from "./ptkit";
 import { AreaChart, equityChartPoints, Pt } from "./ptcharts";
 import { CAT_HUES, fmt } from "./ptdata";
 
@@ -64,21 +64,18 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
   const drawdown: Pt[] = perf?.drawdown_curve ? perf.drawdown_curve.map((p, i) => ({ t: i, v: p.drawdown * 100, d: p.date })) : [];
 
   return (
-    <div style={{ padding: "0 0 32px" }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface-1)", borderBottom: "1px solid var(--border)", padding: "20px 24px 18px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, display: "grid", placeItems: "center", fontSize: 24, background: "var(--surface-2)", border: "1px solid var(--border)", flexShrink: 0 }}>{account.emoji}</div>
-            <div style={{ minWidth: 0 }}>
-              <h2 className="serif" style={{ margin: 0, fontSize: 25, fontWeight: 600, lineHeight: 1.1 }}>{account.name}</h2>
-              <div style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 3 }}>{account.bio || `${account.allocations.length} strategies · ${fmt.usd0(account.starting_cash)} capital`}</div>
-            </div>
+    <DetailShell>
+      <DetailHeader onClose={onClose}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, display: "grid", placeItems: "center", fontSize: 24, background: "var(--surface-2)", border: "1px solid var(--border)", flexShrink: 0 }}>{account.emoji}</div>
+          <div style={{ minWidth: 0 }}>
+            <h2 className="serif" style={{ margin: 0, fontSize: 25, fontWeight: 600, lineHeight: 1.1 }}>{account.name}</h2>
+            <div style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 3 }}>{account.bio || `${account.allocations.length} strategies · ${fmt.usd0(account.starting_cash)} capital`}</div>
           </div>
-          <IconBtn icon="x" onClick={onClose} title="Close" />
         </div>
-      </div>
+      </DetailHeader>
 
-      <div style={{ padding: "22px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
+      <DetailBody>
         {loading && (
           <div style={{ height: 280, display: "grid", placeItems: "center" }}>
             <div style={{ textAlign: "center" }}>
@@ -187,12 +184,12 @@ export default function TraderDetail({ account, onClose, onEdit, onDelete }: {
             {perf.warnings.length > 0 && <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.5 }}>{perf.warnings.slice(0, 3).join(" · ")}</div>}
           </>
         )}
-      </div>
+      </DetailBody>
 
-      <div style={{ position: "sticky", bottom: 0, background: "linear-gradient(transparent, var(--surface-1) 22%)", padding: "18px 24px", display: "flex", gap: 10 }}>
+      <DetailFooter>
         <Btn variant="primary" icon="edit" onClick={() => onEdit(account)} style={{ flex: 1 }}>Edit allocation</Btn>
         <IconBtn icon="trash" size={42} tone="danger" title="Archive trader" onClick={() => onDelete(account)} />
-      </div>
-    </div>
+      </DetailFooter>
+    </DetailShell>
   );
 }

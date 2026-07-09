@@ -1,10 +1,24 @@
 "use client";
 
-import { Bar, BarChart, Cell, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Rectangle, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { BarShapeProps } from "recharts";
 import { AXIS, GRID, POSITIVE, NEGATIVE, TOOLTIP_STYLE } from "./theme";
 import { money } from "@/lib/format";
 
 interface Txn { transaction_date?: string | null; value?: number | null; acquired_disposed?: string | null; is_open_market?: boolean }
+
+function InsiderBar({ x, y, width, height, payload }: BarShapeProps) {
+  return (
+    <Rectangle
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      radius={[3, 3, 0, 0]}
+      fill={payload?.net >= 0 ? POSITIVE : NEGATIVE}
+    />
+  );
+}
 
 // Net insider $ value by month — green (acquired) above zero, red (disposed) below.
 export default function InsiderTimeline({ transactions, height = 240 }: { transactions: Txn[]; height?: number }) {
@@ -26,11 +40,7 @@ export default function InsiderTimeline({ transactions, height = 240 }: { transa
         <YAxis {...AXIS} tickFormatter={(v) => money(v)} width={60} />
         <ReferenceLine y={0} stroke="rgba(255,255,255,0.25)" />
         <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "rgba(255,255,255,0.04)" }} formatter={(v: any) => [money(v), "Net insider"]} />
-        <Bar dataKey="net" maxBarSize={36} radius={[3, 3, 0, 0]} isAnimationActive={false}>
-          {data.map((d, i) => (
-            <Cell key={i} fill={d.net >= 0 ? POSITIVE : NEGATIVE} />
-          ))}
-        </Bar>
+        <Bar dataKey="net" maxBarSize={36} shape={InsiderBar} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   );

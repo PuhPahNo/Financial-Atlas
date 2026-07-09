@@ -27,7 +27,7 @@ stale-but-flagged data, and stay within free quotas.
 Two tiers, both behind `cache_service`:
 
 1. **Response/raw cache** (provider responses) — keyed `{provider}:{method}:{ticker}:{params}`.
-   Backend: filesystem locally (`./.cache`), Render Disk or Key-Value store in prod
+   Backend: bounded filesystem cache locally and on the persistent Render disk
    ([config in 01](01-architecture.md)).
 2. **Persistent store** (normalized facts) — the DB itself ([03](03-data-model.md)) is the durable
    cache for fundamentals/filings/ownership; price/quote freshness handled by TTL.
@@ -61,20 +61,19 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 
 | Job | Cadence | Action |
 | --- | --- | --- |
-| `refresh_prices` | daily after US close | update EOD bars for watchlisted + recently-viewed tickers |
-| `refresh_fundamentals` | daily | pull new 10-K/10-Q for tracked tickers (EDGAR `submissions` delta) |
-| `refresh_filings` | daily | new filings (8-K, Form 4, 13F) for tracked tickers |
-| `recompute_valuations` | daily | recompute default valuations after data refresh |
-| `warm_universe` (optional) | weekly | pre-cache a defined universe (scope TBD in [00](00-master-prd.md#11-open-questions)) |
+| `warm_prices` | nightly at configured UTC hour | warm adjusted prices + PIT fundamentals; deep-refresh a rotating slice |
+| `refresh_headlines` | after `warm_prices` | recompute active strategy headline backtests and prune old runs |
+| live account marks | about every 60s while market is open | pre-warm authenticated trader values |
+| queued backtest worker | continuous | execute one memory-heavy queued run at a time |
 
-- **Local:** APScheduler in-process (`jobs/`). **Render:** Render Cron Jobs invoking the same job
-  functions (one code path, different trigger — orthogonality). See [30](30-deployment-render.md).
-- Jobs are **idempotent** and resumable; each logs counts fetched/skipped/failed.
+- Local and Render use the same FastAPI lifespan loops inside the single web service. Job modules
+  remain directly runnable for maintenance, but production does not provision separate Cron Jobs.
+- Jobs are idempotent/best-effort and log counts fetched, skipped, and failed.
 
 ## 7. Dependencies
 
 [02](02-data-sources.md) (providers + fallback), [03](03-data-model.md) (durable store),
-[01](01-architecture.md) (config of cache/scheduler backend), [30](30-deployment-render.md) (Render cron).
+[01](01-architecture.md) (cache/job config), [30](30-deployment-render.md) (Render service).
 
 ## 8. Edge cases & error handling
 
@@ -92,8 +91,8 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 
 ## 10. Open questions & assumptions
 
-- Render cache backend: **assume** Render Disk for the response cache initially; revisit Key-Value
-  store if multi-instance.
+- Render uses the persistent disk for the response cache; revisit Key-Value only if the service
+  becomes multi-instance.
 - Universe size for `warm_universe` depends on the [00 open question](00-master-prd.md#11-open-questions).
 
 ## 11. Done criteria

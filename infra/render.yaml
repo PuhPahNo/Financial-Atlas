@@ -23,6 +23,10 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /login
+    disk:
+      name: disk
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -34,6 +38,12 @@ services:
         value: production
       - key: LOG_LEVEL
         value: info
+      - key: CACHE_DIR
+        value: /var/data/cache
+      - key: CACHE_MAX_MB
+        value: 512
+      - key: CACHE_MIN_FREE_MB
+        value: 128
       - key: SEC_USER_AGENT
         sync: false
       - key: AUTH_USERNAME
