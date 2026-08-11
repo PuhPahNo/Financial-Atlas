@@ -19,6 +19,7 @@ Turn the existing paper-trading Copilot into a persistent, authenticated assista
 
 - Application OpenAI spend is capped at a cumulative USD 25.00 from this release forward.
 - QA-tagged usage is separately capped at cumulative USD 10.00 and also counts against the USD 25.00 global cap.
+- Paid release QA performed outside the production database is carried into both production ceilings, so environment separation cannot reset or expand the project-wide allowance.
 - The API key remains server-only. Every OpenAI request reserves a conservative maximum cost before it is sent, then reconciles the reservation with reported token usage.
 - Budget and usage live in the existing database so restarts and deploys do not reset the cap. Concurrent requests serialize budget mutations.
 - Default model and rates: `gpt-5.6-terra`, USD 2.00/M uncached input, USD 0.20/M cached input, USD 12.00/M output. All are configurable together so changing models cannot silently retain incorrect rates.

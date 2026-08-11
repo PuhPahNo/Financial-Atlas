@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     openai_output_usd_per_million: float = 12.0
     openai_global_budget_usd: float = 25.0
     openai_qa_budget_usd: float = 10.0
+    # Paid calls made before this deployment's durable ledger (for example,
+    # local release QA) still count toward the same project-wide ceilings.
+    openai_carryover_spend_usd: float = 0.0
+    openai_carryover_qa_spend_usd: float = 0.0
     openai_usage_mode: str = "production"  # set to "qa" for explicit paid QA runs
     openai_max_output_tokens: int = 3000
     openai_max_tool_rounds: int = 6
@@ -123,10 +127,16 @@ class Settings(BaseSettings):
             self.openai_output_usd_per_million,
             self.openai_global_budget_usd,
             self.openai_qa_budget_usd,
+            self.openai_carryover_spend_usd,
+            self.openai_carryover_qa_spend_usd,
         ) < 0:
             raise ValueError("OpenAI rates and budgets cannot be negative")
         if self.openai_qa_budget_usd > self.openai_global_budget_usd:
             raise ValueError("OPENAI_QA_BUDGET_USD cannot exceed OPENAI_GLOBAL_BUDGET_USD")
+        if self.openai_carryover_spend_usd > self.openai_global_budget_usd:
+            raise ValueError("OPENAI_CARRYOVER_SPEND_USD cannot exceed the global budget")
+        if self.openai_carryover_qa_spend_usd > min(self.openai_carryover_spend_usd, self.openai_qa_budget_usd):
+            raise ValueError("OpenAI QA carryover must be within both carryover spend and the QA budget")
         if min(self.openai_max_output_tokens, self.openai_max_tool_rounds, self.openai_timeout_seconds) <= 0:
             raise ValueError("OpenAI output, tool-round, and timeout limits must be positive")
         if self.env.lower() not in {"production", "prod", "staging"} or not self.auth_required:

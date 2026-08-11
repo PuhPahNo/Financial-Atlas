@@ -93,9 +93,11 @@ Use a managed Postgres database plus one Docker web service:
   `OPENAI_GLOBAL_BUDGET_USD=25`, `OPENAI_QA_BUDGET_USD=10`, and
   `OPENAI_USAGE_MODE=production`. The application database tracks cumulative reserved and settled
   spend, and rejects a call before its conservative reservation could cross either cap. Changing
-  the model requires changing the configured rates so the cap remains truthful. The cap begins
-  when this ledger is deployed; set a matching provider-project limit separately if an all-key
-  account ceiling is also required.
+  the model requires changing the configured rates so the cap remains truthful. Paid usage made
+  outside the production ledger must be supplied through `OPENAI_CARRYOVER_SPEND_USD` and
+  `OPENAI_CARRYOVER_QA_SPEND_USD`; the current Render config carries the exact local release-QA
+  spend into both ceilings. Set a matching provider-project limit separately if an all-key account
+  ceiling is also required.
 
 [infra/render.yaml](infra/render.yaml) documents the same settings for review, but manual provisioning
 is fine. See [docs/prd/30-deployment-render.md](docs/prd/30-deployment-render.md).

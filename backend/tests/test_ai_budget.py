@@ -77,3 +77,16 @@ def test_reservation_estimate_dominates_max_reported_usage():
         output_tokens=250,
     )
     assert reserved >= actual_upper
+
+
+def test_external_qa_carryover_counts_against_both_caps(monkeypatch):
+    monkeypatch.setattr(settings, "openai_global_budget_usd", 25.0)
+    monkeypatch.setattr(settings, "openai_qa_budget_usd", 10.0)
+    monkeypatch.setattr(settings, "openai_carryover_spend_usd", 0.203911)
+    monkeypatch.setattr(settings, "openai_carryover_qa_spend_usd", 0.203911)
+
+    current = budget.status()
+    assert current["spent_usd"] == pytest.approx(0.203911)
+    assert current["remaining_usd"] == pytest.approx(24.796089)
+    assert current["qa_spent_usd"] == pytest.approx(0.203911)
+    assert current["qa_remaining_usd"] == pytest.approx(9.796089)

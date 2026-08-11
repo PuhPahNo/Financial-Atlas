@@ -76,6 +76,11 @@ services:
         value: 25.0
       - key: OPENAI_QA_BUDGET_USD
         value: 10.0
+      # Exact paid local release-QA spend carried into the production ceiling.
+      - key: OPENAI_CARRYOVER_SPEND_USD
+        value: 0.203911
+      - key: OPENAI_CARRYOVER_QA_SPEND_USD
+        value: 0.203911
       - key: OPENAI_USAGE_MODE
         value: production
       - key: OPENAI_MAX_OUTPUT_TOKENS

@@ -93,11 +93,13 @@ def reserve(request_payload: dict[str, Any], *, session_id: int | None = None, p
     amount = estimate_reservation_micro(request_payload)
     global_limit = _usd_to_micro(settings.openai_global_budget_usd)
     qa_limit = _usd_to_micro(settings.openai_qa_budget_usd)
+    carryover = _usd_to_micro(settings.openai_carryover_spend_usd)
+    qa_carryover = _usd_to_micro(settings.openai_carryover_qa_spend_usd)
 
     with _LOCK, session_scope() as session:
         _release_stale(session)
         budget = _budget_row(session)
-        global_committed = budget.spent_microusd + budget.reserved_microusd
+        global_committed = carryover + budget.spent_microusd + budget.reserved_microusd
         if global_committed + amount > global_limit:
             raise BudgetExhaustedError(
                 "Atlas AI has reached its $25 global OpenAI budget.",
@@ -105,7 +107,7 @@ def reserve(request_payload: dict[str, Any], *, session_id: int | None = None, p
                 remaining_usd=max(0, global_limit - global_committed) / 1_000_000,
             )
         if purpose == "qa":
-            qa_committed = budget.qa_spent_microusd + budget.qa_reserved_microusd
+            qa_committed = qa_carryover + budget.qa_spent_microusd + budget.qa_reserved_microusd
             if qa_committed + amount > qa_limit:
                 raise BudgetExhaustedError(
                     "Atlas AI QA has reached its $10 OpenAI test budget.",
@@ -186,17 +188,19 @@ def status() -> dict[str, Any]:
         budget = _budget_row(session)
         global_limit = _usd_to_micro(settings.openai_global_budget_usd)
         qa_limit = _usd_to_micro(settings.openai_qa_budget_usd)
-        committed = budget.spent_microusd + budget.reserved_microusd
-        qa_committed = budget.qa_spent_microusd + budget.qa_reserved_microusd
+        carryover = _usd_to_micro(settings.openai_carryover_spend_usd)
+        qa_carryover = _usd_to_micro(settings.openai_carryover_qa_spend_usd)
+        committed = carryover + budget.spent_microusd + budget.reserved_microusd
+        qa_committed = qa_carryover + budget.qa_spent_microusd + budget.qa_reserved_microusd
         return {
             "model": settings.openai_model,
             "enabled": bool(settings.openai_api_key),
             "limit_usd": global_limit / 1_000_000,
-            "spent_usd": budget.spent_microusd / 1_000_000,
+            "spent_usd": (carryover + budget.spent_microusd) / 1_000_000,
             "reserved_usd": budget.reserved_microusd / 1_000_000,
             "remaining_usd": max(0, global_limit - committed) / 1_000_000,
             "qa_limit_usd": qa_limit / 1_000_000,
-            "qa_spent_usd": budget.qa_spent_microusd / 1_000_000,
+            "qa_spent_usd": (qa_carryover + budget.qa_spent_microusd) / 1_000_000,
             "qa_reserved_usd": budget.qa_reserved_microusd / 1_000_000,
             "qa_remaining_usd": max(0, qa_limit - qa_committed) / 1_000_000,
         }
