@@ -38,6 +38,11 @@ class RateLimitError(AtlasError):
     http_status = 429
 
 
+class BudgetExhaustedError(AtlasError):
+    code = "AI_BUDGET_EXHAUSTED"
+    http_status = 429
+
+
 class ProviderError(AtlasError):
     code = "PROVIDER_UNAVAILABLE"
     http_status = 503

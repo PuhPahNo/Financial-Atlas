@@ -61,7 +61,19 @@ class Settings(BaseSettings):
     fmp_daily_budget: int = 180
     finnhub_api_key: str = ""
     openai_api_key: str = ""
-    openai_model: str = "gpt-5.5"
+    # Global Atlas research agent. Token rates deliberately live beside the model:
+    # changing a model without updating its rates would make the application cap lie.
+    # Defaults are the published GPT-5.6 Terra standard rates as of 2026-08-11.
+    openai_model: str = "gpt-5.6-terra"
+    openai_input_usd_per_million: float = 2.0
+    openai_cached_input_usd_per_million: float = 0.2
+    openai_output_usd_per_million: float = 12.0
+    openai_global_budget_usd: float = 25.0
+    openai_qa_budget_usd: float = 10.0
+    openai_usage_mode: str = "production"  # set to "qa" for explicit paid QA runs
+    openai_max_output_tokens: int = 3000
+    openai_max_tool_rounds: int = 6
+    openai_timeout_seconds: int = 45
     auth_required: bool = True
     auth_username: str = "admin"
     auth_password: str = DEV_AUTH_PASSWORD
@@ -103,6 +115,20 @@ class Settings(BaseSettings):
         password entirely, so it must differ from the dev value. AUTH_PASSWORD only has
         to be non-blank: its strength is the operator's deliberate choice (2026-06-09).
         """
+        if self.openai_usage_mode not in {"production", "qa"}:
+            raise ValueError("OPENAI_USAGE_MODE must be 'production' or 'qa'")
+        if min(
+            self.openai_input_usd_per_million,
+            self.openai_cached_input_usd_per_million,
+            self.openai_output_usd_per_million,
+            self.openai_global_budget_usd,
+            self.openai_qa_budget_usd,
+        ) < 0:
+            raise ValueError("OpenAI rates and budgets cannot be negative")
+        if self.openai_qa_budget_usd > self.openai_global_budget_usd:
+            raise ValueError("OPENAI_QA_BUDGET_USD cannot exceed OPENAI_GLOBAL_BUDGET_USD")
+        if min(self.openai_max_output_tokens, self.openai_max_tool_rounds, self.openai_timeout_seconds) <= 0:
+            raise ValueError("OpenAI output, tool-round, and timeout limits must be positive")
         if self.env.lower() not in {"production", "prod", "staging"} or not self.auth_required:
             return self
         missing = []

@@ -6,8 +6,6 @@ import json
 from datetime import date
 from typing import Any
 
-import httpx
-
 from ..core.config import settings
 from ..core.errors import NotFoundError, ValidationError
 from ..core.matching import best_name_match
@@ -17,6 +15,8 @@ from ..paper_trading import accounts as account_service
 from ..paper_trading import service as paper_service
 from .schemas import MessageCreate, SessionCreate
 from .tools import execute_read_tool, execute_write_tool
+from . import research_agent
+from .openai_client import create_response
 
 SYSTEM_PROMPT = (
     "You are Atlas, a research assistant for Financial Atlas. Explain assumptions, use Atlas data "
@@ -41,7 +41,8 @@ _SIGNAL_LABEL = {
 
 def create_session(payload: SessionCreate) -> dict:
     with session_scope() as session:
-        row = AssistantSession(title=payload.title or "Paper trading chat", summary="")
+        default_title = "Atlas research" if payload.surface == "global" else "Paper trading chat"
+        row = AssistantSession(title=payload.title or default_title, surface=payload.surface, summary="")
         session.add(row)
         session.flush()
         return {"session": _session_view(row), "messages": [], "pending_actions": [], "actions": []}
@@ -71,9 +72,20 @@ def add_message(session_id: int, payload: MessageCreate) -> dict:
         source_message_id = user.id
         session.commit()
         tool_calls: list[dict[str, Any]] = []
-        resumed = _resume_workflow_plan(session, row, payload.message, source_message_id=source_message_id)
-        planned = None if resumed else _plan_action(payload.message)
-        if resumed:
+        artifact: dict[str, Any] = {}
+        is_global = row.surface == "global"
+        resumed = None if is_global else _resume_workflow_plan(session, row, payload.message, source_message_id=source_message_id)
+        planned = None if (resumed or is_global) else _plan_action(payload.message)
+        if is_global:
+            answer = research_agent.run(
+                _messages(session, session_id),
+                session_id=session_id,
+                page_context=payload.page_context.model_dump() if payload.page_context else None,
+            )
+            content = answer["content"]
+            tool_calls = answer["tool_calls"]
+            artifact = answer["artifact"]
+        elif resumed:
             content = resumed["content"]
             tool_calls = resumed["tool_calls"]
         elif planned and planned["kind"] == "write":
@@ -94,8 +106,14 @@ def add_message(session_id: int, payload: MessageCreate) -> dict:
             content = _summarize_tool(planned["action"], result)
             tool_calls.append({"tool": planned["action"], "payload": planned["payload"]})
         else:
-            content = _llm_reply(_messages(session, session_id) + [{"role": "user", "content": payload.message}])
-        session.add(AssistantMessage(session_id=session_id, role="assistant", content=content, tool_calls_json=tool_calls))
+            content = _llm_reply(_messages(session, session_id), session_id=session_id)
+        session.add(AssistantMessage(
+            session_id=session_id,
+            role="assistant",
+            content=content,
+            tool_calls_json=tool_calls,
+            artifact_json=artifact,
+        ))
         row.updated_at = _now()
         session.flush()
         return {
@@ -995,7 +1013,7 @@ def _summarize_tool(action: str, result: dict) -> str:
     return "I queried Atlas data and added the result to this conversation."
 
 
-def _llm_reply(messages: list[dict]) -> str:
+def _llm_reply(messages: list[dict], *, session_id: int | None = None) -> str:
     if not settings.openai_api_key:
         return (
             "I can help discuss strategy ideas, valuation assumptions, FCF quality, profitability, capex, "
@@ -1003,18 +1021,15 @@ def _llm_reply(messages: list[dict]) -> str:
         )
     payload = {
         "model": settings.openai_model,
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages[-12:],
-        "temperature": 0.2,
+        "instructions": SYSTEM_PROMPT,
+        "input": [{"role": item["role"], "content": item["content"]} for item in messages[-12:] if item.get("role") in {"user", "assistant"}],
+        "reasoning": {"effort": "low"},
+        "max_output_tokens": min(settings.openai_max_output_tokens, 1200),
+        "store": False,
     }
     try:
-        with httpx.Client(timeout=30) as client:
-            res = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            res.raise_for_status()
-            return res.json()["choices"][0]["message"]["content"]
+        response = create_response(payload, session_id=session_id)
+        return research_agent._output_text(response) or "I could not produce a usable response."
     except Exception:
         return "I could not reach the OpenAI model, but your Atlas data and local assistant tools are still available."
 
@@ -1023,6 +1038,7 @@ def _session_view(row: AssistantSession) -> dict:
     return {
         "id": row.id,
         "title": row.title,
+        "surface": row.surface,
         "summary": row.summary or "",
         "memory": _session_memory(row.summary),
         "created_at": row.created_at.isoformat(),
@@ -1031,7 +1047,13 @@ def _session_view(row: AssistantSession) -> dict:
 
 def _messages(session, session_id: int) -> list[dict]:
     rows = session.query(AssistantMessage).filter_by(session_id=session_id).order_by(AssistantMessage.created_at.asc(), AssistantMessage.id.asc()).all()
-    return [{"id": row.id, "role": row.role, "content": row.content, "tool_calls": row.tool_calls_json or []} for row in rows]
+    return [{
+        "id": row.id,
+        "role": row.role,
+        "content": row.content,
+        "tool_calls": row.tool_calls_json or [],
+        "artifact": row.artifact_json or {},
+    } for row in rows]
 
 
 def _pending(session, session_id: int) -> list[dict]:

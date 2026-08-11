@@ -11,13 +11,21 @@ import tempfile
 _TEST_TMP = tempfile.mkdtemp(prefix="atlas-test-")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEST_TMP}/test.db")
 os.environ.setdefault("CACHE_DIR", f"{_TEST_TMP}/cache")
+# Automated tests must never consume the real project key loaded from the root .env.
+os.environ["OPENAI_API_KEY"] = ""
 
 import pytest
 
 from app.core.rate_limit import reset_rate_limits
 from app.db import init_db, session_scope
 from app.db import CompanySnapshot, PitFundamental, Watchlist
-from app.models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
+from app.models.assistant import (
+    AssistantMessage,
+    AssistantPendingAction,
+    AssistantSession,
+    OpenAIBudget,
+    OpenAIUsage,
+)
 from app.models.paper_trading import BacktestRun, TraderAccount, TradingStrategy
 from app.models.valuation import ValuationResult
 
@@ -88,6 +96,7 @@ def cleanup_feature_test_records():
         sessions = session.query(AssistantSession).filter(
             AssistantSession.title.in_([
                 "Test Strategy Chat",
+                "Test Global Research",
                 "Test Action Chat",
                 "Test Assign Chat",
                 "Test Profiles Chat",
@@ -109,6 +118,8 @@ def cleanup_feature_test_records():
             session.query(AssistantPendingAction).filter(AssistantPendingAction.session_id.in_(session_ids)).delete(synchronize_session=False)
         for assistant_session in sessions:
             session.delete(assistant_session)
+        session.query(OpenAIUsage).delete(synchronize_session=False)
+        session.query(OpenAIBudget).delete(synchronize_session=False)
         session.query(ValuationResult).filter(ValuationResult.ticker.in_(["TST", "NEG"])).delete(synchronize_session=False)
         session.query(CompanySnapshot).filter(CompanySnapshot.ticker.in_(["AAA", "BBB", "CCC", "FAIL"])).delete(synchronize_session=False)
         session.query(PitFundamental).filter(PitFundamental.ticker.in_(["X", "AAA", "BBB"])).delete(synchronize_session=False)

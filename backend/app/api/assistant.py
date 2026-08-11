@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from ..assistant import service
+from ..assistant import budget
 from ..assistant.schemas import MessageCreate, SessionCreate
 from ..core.deps import require_assistant_access
 
@@ -24,6 +25,11 @@ def create_session(payload: SessionCreate):
 @router.get("/assistant/sessions/{session_id}")
 def get_session(session_id: int):
     return envelope(service.get_session(session_id))
+
+
+@router.get("/assistant/budget")
+def get_budget():
+    return envelope(budget.status())
 
 
 @router.post("/assistant/sessions/{session_id}/messages")

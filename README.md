@@ -21,8 +21,10 @@ The user-facing product name is **Atlas**. The repository and internal docs stil
   allocation/rebalance flows, and account performance/value endpoints.
 - **Backtesting**: active-universe screening, point-in-time membership support, factor tests,
   parameter sweeps, and documented caveats for free-data limitations.
-- **Research assistant**: assistant sessions with confirmed tool actions for local Atlas workflows
-  when `OPENAI_API_KEY` is configured.
+- **Atlas Research**: a global, page-aware assistant for company, ETF, financial-statement,
+  valuation, screening, market, and portfolio research. It uses bounded data tools instead of raw
+  SQL and returns grounded interactive charts, sortable tables, and source checks when
+  `OPENAI_API_KEY` is configured. Strategy-builder mutations remain confirmation-gated.
 - **Hosted app controls**: public read-only research, login/session gates for user-owned or mutating
   workflows, assistant/paper-trading rate limits, and a single-tenant Render deployment.
 
@@ -86,7 +88,14 @@ Use a managed Postgres database plus one Docker web service:
 - Recommended cache disk env: `CACHE_DIR=/var/data/cache`, `CACHE_MAX_MB=512`,
   `CACHE_MIN_FREE_MB=128`. The free-space reserve protects the database and price
   store that share the Render disk.
-- Optional env: `OPENAI_API_KEY`, `FMP_API_KEY`, and `FINNHUB_API_KEY`.
+- Optional provider keys: `OPENAI_API_KEY`, `FMP_API_KEY`, and `FINNHUB_API_KEY`.
+- Atlas Research budget env: `OPENAI_MODEL=gpt-5.6-terra`, published per-token rates,
+  `OPENAI_GLOBAL_BUDGET_USD=25`, `OPENAI_QA_BUDGET_USD=10`, and
+  `OPENAI_USAGE_MODE=production`. The application database tracks cumulative reserved and settled
+  spend, and rejects a call before its conservative reservation could cross either cap. Changing
+  the model requires changing the configured rates so the cap remains truthful. The cap begins
+  when this ledger is deployed; set a matching provider-project limit separately if an all-key
+  account ceiling is also required.
 
 [infra/render.yaml](infra/render.yaml) documents the same settings for review, but manual provisioning
 is fine. See [docs/prd/30-deployment-render.md](docs/prd/30-deployment-render.md).
