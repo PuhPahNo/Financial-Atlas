@@ -16,6 +16,9 @@ def isolated_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(cache.settings, "cache_max_mb", 512)
     monkeypatch.setattr(cache.settings, "cache_min_free_mb", 0)
     monkeypatch.setattr(cache, "_write_count", 0)
+    cache._locks.clear()
+    yield
+    cache._locks.clear()
 
 
 def test_get_or_set_records_miss_then_hit_with_trace():
@@ -150,3 +153,11 @@ def test_get_or_set_single_flight_deduplicates_concurrent_loaders():
     assert {result.value["value"] for result in results} == {"shared"}
     assert sum(result.status == "miss" for result in results) == 1
     assert sum(result.status == "hit" for result in results) == 7
+    assert cache._locks == {}
+
+
+def test_single_flight_lock_registry_does_not_grow_with_unique_keys():
+    for i in range(250):
+        cache.get_or_set("unit", f"unique-{i}", 60, lambda: {"value": i})
+
+    assert cache._locks == {}

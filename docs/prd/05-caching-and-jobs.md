@@ -30,7 +30,9 @@ Two tiers, both behind `cache_service`:
    Backend: bounded filesystem cache locally and on the persistent Render disk
    ([config in 01](01-architecture.md)).
 2. **Persistent store** (normalized facts) — the DB itself ([03](03-data-model.md)) is the durable
-   cache for fundamentals/filings/ownership; price/quote freshness handled by TTL.
+   cache for fundamentals/filings/ownership. The compact `price_series` rows are also the durable
+   cache for explicit historical windows, so nightly price-store refreshes bypass duplicate raw
+   response files; price/quote request freshness is otherwise handled by TTL.
 
 ### TTL policy (data changes at very different rates)
 | Data | TTL | Rationale |
@@ -66,8 +68,12 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 | live account marks | about every 60s while market is open | pre-warm authenticated trader values |
 | queued backtest worker | continuous | execute one memory-heavy queued run at a time |
 
-- Local and Render use the same FastAPI lifespan loops inside the single web service. Job modules
-  remain directly runnable for maintenance, but production does not provision separate Cron Jobs.
+- Local and Render use the same FastAPI lifespan scheduler inside the single web service. Nightly
+  warm and headline phases run sequentially in disposable child processes in that same container;
+  this returns each phase's heap to the OS and keeps an OOM-killed maintenance phase from taking the
+  API down. It does not provision another Render service, worker, or Cron Job.
+- Active screening backtests and maintenance phases share a cross-process lock, so memory-heavy
+  scans queue instead of overlapping on the 512 MB service.
 - Jobs are idempotent/best-effort and log counts fetched, skipped, and failed.
 
 ## 7. Dependencies
@@ -78,9 +84,12 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 ## 8. Edge cases & error handling
 
 - Thundering herd (many requests for a cold ticker) → single-flight lock so only one provider call is
-  made; others await the result.
+  made; others await the result. Lock entries are released when the last waiter leaves.
 - Cache backend unavailable → degrade to direct provider calls (slower) without erroring.
-- Job partial failure → continue remaining tickers; surface failures in job log + a health endpoint.
+- Repeated provider failure for a stored price series → serve the stored range and suppress redundant
+  tail/deep-refresh attempts for six hours.
+- Job partial failure or killed child → log the failed phase, continue the scheduler, and leave the
+  web process available; correctness continues to use on-demand/stale-data fallbacks.
 
 ## 9. Testing requirements
 
@@ -88,6 +97,7 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 - TTL test: expired entry triggers refetch; fresh entry does not.
 - Stale-fallback test: upstream failure after TTL serves last-good with `stale=true`.
 - Single-flight test: N concurrent cold requests → 1 upstream call.
+- Maintenance isolation test: a child killed by a signal reports failure without terminating the API.
 
 ## 10. Open questions & assumptions
 

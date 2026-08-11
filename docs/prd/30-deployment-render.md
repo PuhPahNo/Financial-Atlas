@@ -14,7 +14,7 @@ persistent cache disk, with repeatable `main`-branch deploys and fail-closed sta
 | Docker web service | Next.js on Render's public `$PORT`; FastAPI privately on `127.0.0.1:8000` |
 | Managed Postgres | application persistence via `DATABASE_URL` |
 | Persistent disk | bounded provider cache and durable price data under `/var/data` |
-| In-process workers | queued backtests, live account marks, nightly data maintenance |
+| Background work | in-process scheduler/queues; disposable same-container nightly child phases |
 | Render environment | credentials, provider keys, database URL, and runtime configuration |
 
 The service is provisioned manually. `infra/render.yaml` is a reviewed reference for the same shape,
@@ -29,7 +29,10 @@ not evidence that a Blueprint owns the live resources.
 - FastAPI startup creates missing tables, reconciles additive columns, then runs the ordered
   `atlas_schema_migrations` revisions transactionally.
 - Destructive migrations validate production data and raise before DDL when a precondition fails.
-- `DATA_MAINTENANCE_*` and `LIVE_MARK_*` control the in-process loops. No Render Cron Job is required.
+- `DATA_MAINTENANCE_*` and `LIVE_MARK_*` control the in-process scheduler. Nightly maintenance
+  launches sequential warm/headline child processes inside this web service, with allocator limits
+  and cross-process heavy-work serialization suitable for the Starter 512 MB memory budget. No
+  additional Render worker, Cron Job, or plan upgrade is required.
 
 ## 4. Deploy flow
 
@@ -75,6 +78,8 @@ Postgres CI lane today; [07](07-testing-and-quality.md) records that gap.
 - Provider keys are optional and unavailable sources degrade with explicit warnings.
 - Cache pruning reserves disk space before writes and retries after pruning.
 - Queued jobs interrupted by a deploy are marked failed on boot and can be rerun.
+- If Render kills a nightly child for memory, the parent API remains healthy, logs the failed phase,
+  and retries on the next schedule/on-demand path rather than restarting the whole service.
 
 ## 9. Done criteria
 

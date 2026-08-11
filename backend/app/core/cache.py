@@ -26,19 +26,35 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class _LockEntry:
+    lock: threading.Lock
+    users: int = 0
+
+
 # Per-key locks for single-flight: only one thread fetches a given key at a time;
-# concurrent callers wait and then read the freshly-written value.
-_locks: dict[str, threading.Lock] = {}
+# concurrent callers wait and then read the freshly-written value. Entries are
+# reference-counted so date-window cache keys do not leave an unbounded lock map.
+_locks: dict[str, _LockEntry] = {}
 _locks_guard = threading.Lock()
 
 
-def _lock_for(token: str) -> threading.Lock:
+@contextmanager
+def _key_lock(token: str):
     with _locks_guard:
-        lock = _locks.get(token)
-        if lock is None:
-            lock = threading.Lock()
-            _locks[token] = lock
-        return lock
+        entry = _locks.get(token)
+        if entry is None:
+            entry = _LockEntry(lock=threading.Lock())
+            _locks[token] = entry
+        entry.users += 1
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _locks_guard:
+            entry.users -= 1
+            if entry.users == 0 and _locks.get(token) is entry:
+                del _locks[token]
 
 
 @dataclass
@@ -259,7 +275,7 @@ def get_or_set(namespace: str, key: str, ttl_seconds: int, loader: Callable[[], 
         return result
 
     # Single-flight: only one thread loads a given key; others wait then re-read.
-    with _lock_for(f"{namespace}:{key}"):
+    with _key_lock(f"{namespace}:{key}"):
         result, record, now = _read_cached(path, namespace, key, ttl_seconds)
         if result is not None:
             return result

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -78,7 +81,7 @@ async def _backtest_worker_loop() -> None:
 
 
 async def _data_maintenance_loop() -> None:
-    """Nightly free-data maintenance, in-process (PRD free-data-pipeline).
+    """Nightly free-data maintenance on the existing single web service.
 
     Warms the durable price store + PIT fundamentals for the investable superset, then
     refreshes every model card's headline backtest so stored numbers always come from
@@ -88,15 +91,6 @@ async def _data_maintenance_loop() -> None:
     correctness never depends on it (on-demand paths self-heal).
     """
     maint_log = logging.getLogger("app.data_maintenance")
-
-    async def run_all(reason: str) -> None:
-        from .jobs import refresh_headlines, warm_prices
-        maint_log.info("data maintenance (%s): warming price store + fundamentals", reason)
-        warmed = await asyncio.to_thread(warm_prices.run)
-        maint_log.info("data maintenance (%s): warm done %s; refreshing headlines", reason, warmed)
-        refreshed = await asyncio.to_thread(refresh_headlines.run)
-        maint_log.info("data maintenance (%s) complete: refreshed=%s failed=%s", reason,
-                       refreshed.get("refreshed"), len(refreshed.get("failed") or []))
 
     def needs_bootstrap() -> bool:
         """Cold price store (fresh deploy / wiped DB) — or no seeded model carries a
@@ -118,7 +112,7 @@ async def _data_maintenance_loop() -> None:
     await asyncio.sleep(120)  # let boot settle before any heavy work
     try:
         if needs_bootstrap():
-            await run_all("bootstrap")
+            await _run_data_maintenance_process("bootstrap")
     except Exception as exc:  # noqa: BLE001
         maint_log.warning("data maintenance bootstrap error: %s", exc)
 
@@ -130,11 +124,56 @@ async def _data_maintenance_loop() -> None:
             if target <= now:
                 target += timedelta(days=1)
             await asyncio.sleep((target - now).total_seconds())
-            await run_all("nightly")
+            await _run_data_maintenance_process("nightly")
         except asyncio.CancelledError:
             break
         except Exception as exc:  # noqa: BLE001 — keep the loop alive across transient errors
             maint_log.warning("data maintenance error: %s", exc)
+
+
+async def _run_data_maintenance_process(reason: str) -> bool:
+    """Run warm and headline phases in disposable children on this same instance."""
+    maint_log = logging.getLogger("app.data_maintenance")
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    env.setdefault("MALLOC_ARENA_MAX", "2")
+    env.setdefault("MALLOC_TRIM_THRESHOLD_", "65536")
+    all_ok = True
+
+    for phase in ("warm", "headlines"):
+        maint_log.info("data maintenance (%s/%s): launching isolated child", reason, phase)
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "app.jobs.maintenance_cycle",
+            "--phase", phase, "--reason", reason,
+            env=env,
+        )
+        try:
+            returncode = await proc.wait()
+        except asyncio.CancelledError:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+            raise
+
+        if returncode == 0:
+            maint_log.info("data maintenance (%s/%s): child complete", reason, phase)
+            continue
+        all_ok = False
+        if returncode < 0:
+            signal_name = signal.Signals(-returncode).name
+            maint_log.error(
+                "data maintenance (%s/%s): child terminated by %s; web process remains available",
+                reason, phase, signal_name,
+            )
+        else:
+            maint_log.error(
+                "data maintenance (%s/%s): child exited %d; web process remains available",
+                reason, phase, returncode,
+            )
+    return all_ok
 
 
 @asynccontextmanager

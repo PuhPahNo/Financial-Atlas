@@ -84,7 +84,7 @@ Single typed settings object (`core/config.py`, Pydantic `BaseSettings`) sourced
 | `CACHE_DIR` | `backend/.cache` | `/var/data/cache` on the persistent disk |
 | `CACHE_MAX_MB`, `CACHE_MIN_FREE_MB` | bounded filesystem cache | disk-size and free-space guardrails |
 | `*_API_KEY` (per provider) | `.env` (gitignored) | Render env group (secrets) |
-| `DATA_MAINTENANCE_*`, `LIVE_MARK_*` | in-process loops | same single-service loops |
+| `DATA_MAINTENANCE_*`, `LIVE_MARK_*` | single-service scheduler | same scheduler; isolated nightly child phases |
 | `LOG_LEVEL`, `ENV` | `debug`, `local` | `info`, `production` |
 
 No secrets in code or git. `.env.example` documents every variable.

@@ -11,7 +11,9 @@ TICKER = "TSTORE"
 
 @pytest.fixture(autouse=True)
 def _clean_store():
+    price_store._refresh_failures.clear()
     yield
+    price_store._refresh_failures.clear()
     with session_scope() as s:
         s.query(PriceSeries).filter(PriceSeries.ticker == TICKER).delete(synchronize_session=False)
 
@@ -28,8 +30,9 @@ def _payload(start: date, end: date, price_fn, adjust=1.0):
 def test_first_fetch_persists_then_serves_locally(monkeypatch):
     calls = {"n": 0}
 
-    def pw(sym, *, start, end, interval="1d"):
+    def pw(sym, *, start, end, interval="1d", cache_response=True):
         calls["n"] += 1
+        assert cache_response is False
         return _payload(start, end, lambda d: 100.0), "yahoo"
 
     monkeypatch.setattr(price_store.prices, "price_window", pw)
@@ -43,7 +46,7 @@ def test_first_fetch_persists_then_serves_locally(monkeypatch):
 
 def test_uses_adjusted_close_over_raw(monkeypatch):
     monkeypatch.setattr(price_store.prices, "price_window",
-                        lambda sym, *, start, end, interval="1d": (_payload(start, end, lambda d: 100.0, adjust=0.5), "yahoo"))
+                        lambda sym, *, start, end, interval="1d", cache_response=True: (_payload(start, end, lambda d: 100.0, adjust=0.5), "yahoo"))
     _, closes, _ = price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 1, 10))
     assert all(c == 50.0 for c in closes)  # adjusted (× 0.5), not the raw 100
 
@@ -51,7 +54,7 @@ def test_uses_adjusted_close_over_raw(monkeypatch):
 def test_tail_append_fetches_only_missing_bars(monkeypatch):
     windows = []
 
-    def pw(sym, *, start, end, interval="1d"):
+    def pw(sym, *, start, end, interval="1d", cache_response=True):
         windows.append((start, end))
         return _payload(start, end, lambda d: 100.0), "yahoo"
 
@@ -68,7 +71,7 @@ def test_readjustment_triggers_full_refetch(monkeypatch):
     drift and the store must replace the whole series instead of mixing bases."""
     phase = {"adjust": 1.0}
 
-    def pw(sym, *, start, end, interval="1d"):
+    def pw(sym, *, start, end, interval="1d", cache_response=True):
         return _payload(start, end, lambda d: 100.0, adjust=phase["adjust"]), "yahoo"
 
     monkeypatch.setattr(price_store.prices, "price_window", pw)
@@ -80,12 +83,56 @@ def test_readjustment_triggers_full_refetch(monkeypatch):
 
 def test_provider_outage_serves_stored_history(monkeypatch):
     monkeypatch.setattr(price_store.prices, "price_window",
-                        lambda sym, *, start, end, interval="1d": (_payload(start, end, lambda d: 100.0), "yahoo"))
+                        lambda sym, *, start, end, interval="1d", cache_response=True: (_payload(start, end, lambda d: 100.0), "yahoo"))
     price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 2, 1))
 
-    def boom(sym, *, start, end, interval="1d"):
+    def boom(sym, *, start, end, interval="1d", cache_response=True):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(price_store.prices, "price_window", boom)
     dates, closes, _ = price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 3, 1))
     assert dates and dates[-1] == "2020-02-01"  # stale tail beats a failed request
+
+
+def test_failed_tail_refresh_is_cooled_down(monkeypatch):
+    monkeypatch.setattr(
+        price_store.prices,
+        "price_window",
+        lambda sym, *, start, end, interval="1d", cache_response=True: (
+            _payload(start, end, lambda d: 100.0), "yahoo"
+        ),
+    )
+    price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 2, 1))
+    calls = {"n": 0}
+
+    def boom(sym, *, start, end, interval="1d", cache_response=True):
+        calls["n"] += 1
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(price_store.prices, "price_window", boom)
+    price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 3, 1))
+    price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 3, 1))
+
+    assert calls["n"] == 1
+
+
+def test_empty_tail_refresh_is_cooled_down(monkeypatch):
+    monkeypatch.setattr(
+        price_store.prices,
+        "price_window",
+        lambda sym, *, start, end, interval="1d", cache_response=True: (
+            _payload(start, end, lambda d: 100.0), "yahoo"
+        ),
+    )
+    price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 2, 1))
+    calls = {"n": 0}
+
+    def empty(sym, *, start, end, interval="1d", cache_response=True):
+        calls["n"] += 1
+        return {"bars": [], "currency": "USD"}, "yahoo"
+
+    monkeypatch.setattr(price_store.prices, "price_window", empty)
+    price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 3, 1))
+    price_store.get_series(TICKER, date(2020, 1, 1), date(2020, 3, 1))
+
+    assert calls["n"] == 1

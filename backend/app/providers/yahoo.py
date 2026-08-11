@@ -44,14 +44,16 @@ class YahooProvider:
                 url = f"https://{host}/v8/finance/chart/{sym}"
                 try:
                     return get_json(url, headers=_HEADERS, params=full, provider=self.name)
-                except NotFoundError:
-                    raise
-                except (RateLimitError, ProviderError) as exc:
+                except (NotFoundError, RateLimitError, ProviderError) as exc:
                     last_exc = exc
                     continue
             # Both hosts rejected us — the crumb may be stale/missing; refresh and retry once.
             if attempt == 0:
                 http.reset_yahoo_crumb()
+        if isinstance(last_exc, NotFoundError):
+            # A 404 from one Yahoo chart host is not authoritative: the sibling host
+            # can still serve the symbol, and Stooq remains a valid final fallback.
+            raise ProviderError(f"{sym} not found on either Yahoo host") from last_exc
         raise last_exc or ProviderError(f"Yahoo chart unavailable for {sym}")
 
     def _chart(self, ticker: str, *, yrange: str, interval: str) -> dict:
@@ -65,7 +67,10 @@ class YahooProvider:
         ttl = 3600 if interval == "1d" else 6 * 3600
         return cache.get_or_set("yahoo", f"chart:{sym}:{yrange}:{interval}", ttl_seconds=ttl, loader=load).value
 
-    def _chart_window(self, ticker: str, *, period1: int, period2: int, interval: str) -> dict:
+    def _chart_window(
+        self, ticker: str, *, period1: int, period2: int, interval: str,
+        cache_response: bool = True,
+    ) -> dict:
         """Explicit date-window fetch — Yahoo serves true daily bars for any window
         (the ``range=max`` shortcut downsamples to monthly for long spans)."""
         sym = ticker.upper().replace(".", "-")
@@ -73,6 +78,8 @@ class YahooProvider:
         def load():
             return self._fetch(sym, {"period1": period1, "period2": period2, "interval": interval})
 
+        if not cache_response:
+            return load()
         ttl = 6 * 3600  # historical windows are immutable; cache longer
         return cache.get_or_set("yahoo", f"chart:{sym}:{period1}-{period2}:{interval}", ttl_seconds=ttl, loader=load).value
 
@@ -127,9 +134,15 @@ class YahooProvider:
         data = self._chart(ticker, yrange=yrange, interval=interval.value if isinstance(interval, Interval) else interval)
         return self._parse_result(self._result(data, ticker), ticker)
 
-    def get_price_window(self, ticker: str, *, period1: int, period2: int, interval: Interval = Interval.DAY) -> list[PriceBar]:
+    def get_price_window(
+        self, ticker: str, *, period1: int, period2: int,
+        interval: Interval = Interval.DAY, cache_response: bool = True,
+    ) -> list[PriceBar]:
         iv = interval.value if isinstance(interval, Interval) else interval
-        data = self._chart_window(ticker, period1=period1, period2=period2, interval=iv)
+        data = self._chart_window(
+            ticker, period1=period1, period2=period2, interval=iv,
+            cache_response=cache_response,
+        )
         return self._parse_result(self._result(data, ticker), ticker)
 
     def get_quote(self, ticker: str) -> Quote:

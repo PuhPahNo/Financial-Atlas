@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from datetime import date, timedelta
 
 from ..db import PriceSeries, session_scope
@@ -35,6 +37,10 @@ logger = logging.getLogger(__name__)
 # split-only prices. Float/rounding noise in provider adjcloses is far below 0.05%.
 _OVERLAP_BARS = 5
 _READJUST_TOLERANCE = 0.0005
+_REFRESH_FAILURE_TTL_SECONDS = 6 * 3600
+_MAX_REFRESH_FAILURES = 2048
+_refresh_failures: dict[str, float] = {}
+_refresh_failures_lock = threading.Lock()
 
 
 def _iso(d: date | str) -> str:
@@ -59,9 +65,46 @@ def _bars_to_arrays(payload: dict) -> tuple[list[str], list[float]]:
 
 
 def _fetch(ticker: str, start: date, end: date) -> tuple[list[str], list[float], str]:
-    payload, served_by = prices.price_window(ticker, start=start, end=end, interval="1d")
+    # The durable store is the cache for explicit historical windows. Avoid writing a
+    # second, date-keyed raw response file for every nightly tail/deep refresh.
+    payload, served_by = prices.price_window(
+        ticker, start=start, end=end, interval="1d", cache_response=False,
+    )
     dates, closes = _bars_to_arrays(payload)
     return dates, closes, served_by
+
+
+def _refresh_blocked(ticker: str) -> bool:
+    now = time.monotonic()
+    with _refresh_failures_lock:
+        deadline = _refresh_failures.get(ticker)
+        if deadline is None:
+            return False
+        if deadline <= now:
+            _refresh_failures.pop(ticker, None)
+            return False
+        return True
+
+
+def _record_refresh_failure(ticker: str, operation: str, exc: Exception) -> None:
+    now = time.monotonic()
+    with _refresh_failures_lock:
+        if len(_refresh_failures) >= _MAX_REFRESH_FAILURES:
+            expired = [key for key, deadline in _refresh_failures.items() if deadline <= now]
+            for key in expired:
+                _refresh_failures.pop(key, None)
+            if len(_refresh_failures) >= _MAX_REFRESH_FAILURES:
+                _refresh_failures.pop(min(_refresh_failures, key=_refresh_failures.get), None)
+        _refresh_failures[ticker] = now + _REFRESH_FAILURE_TTL_SECONDS
+    logger.info(
+        "price store %s failed for %s (%s: %s); suppressing provider retries for 6h",
+        operation, ticker, type(exc).__name__, exc,
+    )
+
+
+def _clear_refresh_failure(ticker: str) -> None:
+    with _refresh_failures_lock:
+        _refresh_failures.pop(ticker, None)
 
 
 def _read(ticker: str) -> dict | None:
@@ -140,18 +183,21 @@ def get_series(ticker: str, start: date, end: date) -> tuple[list[str], list[flo
     dates, closes = stored["dates"], stored["closes"]
 
     # Need history before what we have → one full refetch covering the union.
-    if _iso(start) < dates[0]:
+    if _iso(start) < dates[0] and not _refresh_blocked(tk):
         try:
             full_end = max(end, date.fromisoformat(dates[-1]))
             f_dates, f_closes, source = _fetch(tk, start, full_end)
             if f_dates:
                 _write(tk, f_dates, f_closes, source)
                 dates, closes = f_dates, f_closes
-        except Exception:  # noqa: BLE001 — serve what we have
-            logger.info("price store backfill failed for %s; serving stored range", tk)
+                _clear_refresh_failure(tk)
+            else:
+                _record_refresh_failure(tk, "backfill", RuntimeError("provider returned no bars"))
+        except Exception as exc:  # noqa: BLE001 — serve what we have
+            _record_refresh_failure(tk, "backfill", exc)
 
     # Need bars after what we have → tail fetch with an overlap re-adjustment check.
-    if _iso(end) > dates[-1]:
+    if _iso(end) > dates[-1] and not _refresh_blocked(tk):
         try:
             tail_start = date.fromisoformat(dates[-1]) - timedelta(days=14)
             t_dates, t_closes, source = _fetch(tk, tail_start, end)
@@ -169,8 +215,11 @@ def get_series(ticker: str, start: date, end: date) -> tuple[list[str], list[flo
                     if f_dates:
                         dates, closes = f_dates, f_closes
                         _write(tk, dates, closes, source)
-        except Exception:  # noqa: BLE001 — stale tail beats a failed request
-            logger.info("price store tail refresh failed for %s; serving stored bars", tk)
+                _clear_refresh_failure(tk)
+            else:
+                _record_refresh_failure(tk, "tail refresh", RuntimeError("provider returned no bars"))
+        except Exception as exc:  # noqa: BLE001 — stale tail beats a failed request
+            _record_refresh_failure(tk, "tail refresh", exc)
 
     out_d, out_c = _slice(dates, closes, start, end)
     return out_d, out_c, "store"
@@ -200,13 +249,16 @@ def deep_refresh(ticker: str) -> bool:
     over the store so every series heals within a couple of weeks."""
     tk = ticker.strip().upper()
     stored = _read(tk)
+    if _refresh_blocked(tk):
+        return False
     start = date.fromisoformat(stored["dates"][0]) if stored else date(2000, 1, 1)
     try:
         dates, closes, source = _fetch(tk, start, date.today())
-    except Exception:  # noqa: BLE001 — keep the stored series on provider failure
-        logger.info("deep refresh fetch failed for %s; keeping stored series", tk)
+    except Exception as exc:  # noqa: BLE001 — keep the stored series on provider failure
+        _record_refresh_failure(tk, "deep refresh", exc)
         return False
     if not dates:
+        _record_refresh_failure(tk, "deep refresh", RuntimeError("provider returned no bars"))
         return False
     # Never replace a long history with a stub response (partial provider outage).
     if stored and len(dates) < len(stored["dates"]) // 2:
@@ -214,4 +266,5 @@ def deep_refresh(ticker: str) -> bool:
                        tk, len(dates), len(stored["dates"]))
         return False
     _write(tk, dates, closes, source)
+    _clear_refresh_failure(tk)
     return True

@@ -74,7 +74,10 @@ def _parse_csv(text: str, sym: str) -> list[PriceBar]:
 class StooqProvider:
     name = "stooq"
 
-    def _bars(self, sym: str, *, code: str, d1: str | None = None, d2: str | None = None) -> list[PriceBar]:
+    def _bars(
+        self, sym: str, *, code: str, d1: str | None = None, d2: str | None = None,
+        cache_response: bool = True,
+    ) -> list[PriceBar]:
         params: dict[str, str] = {"s": sym, "i": code}
         if d1:
             params["d1"] = d1
@@ -86,7 +89,10 @@ class StooqProvider:
 
         # Daily bars settle once per trading day; cache for the trading window.
         key = f"hist:{sym}:{code}:{d1 or ''}-{d2 or ''}"
-        text = cache.get_or_set("stooq", key, ttl_seconds=6 * 3600, loader=load).value
+        text = (
+            cache.get_or_set("stooq", key, ttl_seconds=6 * 3600, loader=load).value
+            if cache_response else load()
+        )
         return _parse_csv(text, sym)
 
     def get_price_history(self, ticker: str, *, range: str = "1y", interval: Interval = Interval.DAY) -> list[PriceBar]:
@@ -95,10 +101,16 @@ class StooqProvider:
         d1 = None if range == "max" else (date.today() - timedelta(days=days)).strftime("%Y%m%d")
         return self._bars(_symbol(ticker), code=code, d1=d1)
 
-    def get_price_window(self, ticker: str, *, period1: int, period2: int, interval: Interval = Interval.DAY) -> list[PriceBar]:
+    def get_price_window(
+        self, ticker: str, *, period1: int, period2: int,
+        interval: Interval = Interval.DAY, cache_response: bool = True,
+    ) -> list[PriceBar]:
         d1 = datetime.fromtimestamp(period1, tz=timezone.utc).strftime("%Y%m%d")
         d2 = datetime.fromtimestamp(period2, tz=timezone.utc).strftime("%Y%m%d")
-        return self._bars(_symbol(ticker), code=_interval_code(interval), d1=d1, d2=d2)
+        return self._bars(
+            _symbol(ticker), code=_interval_code(interval), d1=d1, d2=d2,
+            cache_response=cache_response,
+        )
 
     def get_quote(self, ticker: str) -> Quote:
         # Derive a quote from ~13 months of daily bars: last close, prior session,

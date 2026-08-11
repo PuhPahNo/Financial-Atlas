@@ -8,6 +8,7 @@ import pytest
 
 from app.core.errors import NotFoundError, ProviderError
 from app.providers import registry
+from app.providers import yahoo as yahoo_module
 from app.providers.stooq import StooqProvider, _parse_csv, _symbol
 from app.providers.yahoo import YahooProvider
 
@@ -53,6 +54,55 @@ def test_yahoo_unexpected_body_is_provider_error():
         YahooProvider._result(["unexpected"], "AAPL")
     with pytest.raises(ProviderError):
         YahooProvider._parse_result(None, "AAPL")
+
+
+def test_yahoo_404_fails_over_to_second_host(monkeypatch):
+    calls = []
+
+    def fetch(url, **_kwargs):
+        calls.append(url)
+        if "query1" in url:
+            raise NotFoundError("first host returned 404")
+        return {"chart": {"result": [{"timestamp": []}]}}
+
+    monkeypatch.setattr(yahoo_module.http, "ensure_yahoo_crumb", lambda _headers: "crumb")
+    monkeypatch.setattr(yahoo_module, "get_json", fetch)
+
+    result = YahooProvider()._fetch("AAPL", {"range": "1y", "interval": "1d"})
+
+    assert result["chart"]["result"]
+    assert ["query1" in call for call in calls] == [True, False]
+
+
+def test_yahoo_all_host_404s_become_fallback_eligible(monkeypatch):
+    calls = []
+
+    def missing(url, **_kwargs):
+        calls.append(url)
+        raise NotFoundError("host returned 404")
+
+    monkeypatch.setattr(yahoo_module.http, "ensure_yahoo_crumb", lambda _headers: "crumb")
+    monkeypatch.setattr(yahoo_module.http, "reset_yahoo_crumb", lambda: None)
+    monkeypatch.setattr(yahoo_module, "get_json", missing)
+
+    with pytest.raises(ProviderError, match="not found on either Yahoo host"):
+        YahooProvider()._fetch("BK", {"range": "1y", "interval": "1d"})
+
+    assert len(calls) == 4  # two hosts, then one crumb refresh/retry
+
+
+def test_yahoo_window_can_bypass_raw_response_cache(monkeypatch):
+    provider = YahooProvider()
+    monkeypatch.setattr(provider, "_fetch", lambda *_args, **_kwargs: {"chart": {"result": []}})
+    monkeypatch.setattr(
+        yahoo_module.cache,
+        "get_or_set",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("raw cache used")),
+    )
+
+    assert provider._chart_window(
+        "AAPL", period1=1, period2=2, interval="1d", cache_response=False
+    ) == {"chart": {"result": []}}
 
 
 class _BadProvider:

@@ -52,7 +52,10 @@ _DEFAULT_LIMIT = _TokenBucket(rate=4, burst=4)
 # A persistent client so cookies set by an upstream (notably Yahoo's consent
 # cookie) carry across requests within the process.
 _client = httpx.Client(timeout=20.0, follow_redirects=True, headers={"Accept-Encoding": "gzip, deflate"})
-_SENSITIVE_QUERY_KEYS = {"apikey", "api_key", "api-key", "access_token", "token", "secret", "password", "key"}
+_SENSITIVE_QUERY_KEYS = {
+    "apikey", "api_key", "api-key", "access_token", "token", "secret", "password", "key",
+    "crumb",
+}
 
 # --- Yahoo session bootstrap ------------------------------------------------
 # Yahoo's chart API began requiring a consent cookie + crumb for many callers

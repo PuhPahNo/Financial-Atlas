@@ -7,8 +7,8 @@ each ticker's full history once (~1 provider call per ticker, throttled by the
 shared token bucket); every later run appends only the missing tail, so a nightly
 cron keeps decades of backtest data fresh for roughly one small request per ticker.
 
-Production calls this from the in-process nightly maintenance loop. It can also
-be run manually: ``python -m app.jobs.warm_prices``.
+Production's in-process scheduler calls this in a disposable same-container
+maintenance child. It can also be run manually: ``python -m app.jobs.warm_prices``.
 """
 from __future__ import annotations
 

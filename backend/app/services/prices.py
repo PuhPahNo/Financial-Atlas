@@ -17,12 +17,16 @@ def _epoch(day: date) -> int:
     return int(datetime.combine(day, time(0, 0), tzinfo=timezone.utc).timestamp())
 
 
-def price_window(ticker: str, *, start: date, end: date, interval: str = "1d"):
+def price_window(
+    ticker: str, *, start: date, end: date, interval: str = "1d",
+    cache_response: bool = True,
+):
     """True daily bars for an explicit historical window (no range downsampling)."""
     iv = Interval(interval) if interval in {i.value for i in Interval} else Interval.DAY
     bars, served_by = run_chain(
         "prices", "get_price_window", ticker,
         period1=_epoch(start), period2=_epoch(end), interval=iv,
+        cache_response=cache_response,
     )
     return {"bars": [b.model_dump() for b in bars], "currency": "USD"}, served_by
 

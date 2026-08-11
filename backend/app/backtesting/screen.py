@@ -16,7 +16,7 @@ Integrity contract:
 
 Memory: prices are held as compact parallel arrays (``dates`` + ``closes``), not a fat
 list-of-dicts, so a full S&P 500 scan fits in a 512MB instance. Heavy runs are serialized
-by ``_ENGINE_LOCK`` so concurrent requests / the live-mark tick can't stack and OOM the box.
+across the web and maintenance processes so concurrent scans cannot stack and OOM the box.
 
 Marking convention (shared with the rule engine and the live mark): a position stores a
 positive ``qty`` + ``direction`` + ``entry_price``; long value = qty·price, short value =
@@ -25,13 +25,13 @@ entry-vs-price term, keeping net liquidation conserved.
 """
 from __future__ import annotations
 
-import threading
 from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import date, timedelta
 
 from ..core import cache
 from ..core.errors import ValidationError
+from ..core.heavy_work import lock as heavy_work_lock
 from ..services import price_store
 from . import factors
 from .integrity import build_integrity
@@ -39,11 +39,6 @@ from .metrics import summarize
 from .pit_fundamentals import as_of, as_of_with_prior
 
 _DEFAULT_MAX_POSITIONS = 8
-
-# Serialize heavy backtests process-wide: only one universe scan runs at a time, so
-# concurrent backtest requests + the market-open live-mark tick can't stack their memory
-# and blow past the instance limit. (Backtests queue rather than crash the whole app.)
-_ENGINE_LOCK = threading.Lock()
 
 # Dead-ticker skiplist: symbols whose price fetch hard-errors (404 / unresolved — typically
 # delisted names in the historical superset) are remembered so the engine stops re-fetching
@@ -657,7 +652,7 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
     stop-loss / max-hold / criteria-break, then fill free slots with the best names that
     *newly* meet the model's criteria. Eligibility is computed with data through the
     *prior* session and fills execute at *today's* close (next-bar execution). Serialized
-    via ``_ENGINE_LOCK`` and memory-lean (compact price arrays)."""
+    across processes and memory-lean (compact price arrays)."""
     if end_date <= start_date:
         raise ValidationError("Backtest end_date must be after start_date")
     universe = sorted({t.strip().upper() for t in (universe or []) if t and t.strip()})
@@ -670,7 +665,7 @@ def run_active_backtest(*, strategy: dict, universe: list[str], start_date: date
         warnings.append(_UNIVERSE_CAVEAT)
     warmup_start = date(max(1962, start_date.year - 2), 1, 1)
 
-    with _ENGINE_LOCK:
+    with heavy_work_lock():
         series, benchmark_dates, benchmark_closes = _load_active_market_data(
             universe, warmup_start, end_date, benchmark, warnings,
         )

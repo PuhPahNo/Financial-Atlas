@@ -5,6 +5,8 @@
 # - Next.js listens on Render's public $PORT.
 # - FastAPI listens privately on 127.0.0.1:8000 inside the same container.
 # - Next rewrites /api/* to the private FastAPI process via BACKEND_URL.
+# - Nightly maintenance uses disposable child processes in this same Starter web
+#   service; it does not require a paid worker, Cron Job, or plan change.
 #
 # The project is provisioned manually in Render; this file documents the same
 # settings for review or future Blueprint use.

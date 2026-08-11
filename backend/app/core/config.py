@@ -80,11 +80,11 @@ class Settings(BaseSettings):
     live_mark_interval_seconds: int = 60
     live_quote_ttl_seconds: int = 60
 
-    # Nightly in-process data maintenance (PRD free-data-pipeline): warms the durable
-    # price store + PIT fundamentals, then refreshes every model card's headline backtest
-    # on the current engine. Runs inside the single web service (same pattern as the
-    # live-mark loop — no extra Render service). Also bootstraps once shortly after boot
-    # when the price store is cold (fresh deploy / wiped DB) so cards self-populate.
+    # Nightly data maintenance (PRD free-data-pipeline): the in-process scheduler launches
+    # sequential disposable child phases to warm the durable price store/PIT fundamentals
+    # and refresh model headlines. Everything stays inside the single web service — no
+    # extra Render service — while phase exit returns heap to the OS. It also bootstraps
+    # shortly after boot when the price store is cold so cards self-populate.
     data_maintenance_enabled: bool = True
     data_maintenance_utc_hour: int = 8  # 08:30 UTC ≈ hours before the US open
 
