@@ -5,6 +5,9 @@ if (!/^https?:\/\//.test(BACKEND_URL)) BACKEND_URL = `https://${BACKEND_URL}`;
 
 const nextConfig = {
   reactStrictMode: true,
+  // Atlas serves only trusted, bundled images. Keeping the optimizer disabled
+  // removes the native image-processing path (and its memory/security surface).
+  images: { unoptimized: true },
   async rewrites() {
     // Proxy API calls to the FastAPI backend (avoids CORS; one origin in dev).
     return [{ source: "/api/:path*", destination: `${BACKEND_URL}/api/:path*` }];
