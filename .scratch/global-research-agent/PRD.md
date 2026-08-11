@@ -8,7 +8,7 @@ Turn the existing paper-trading Copilot into a persistent, authenticated assista
 
 ## Product contract
 
-- A floating Atlas button is present globally, including paper trading. Desktop uses a polished right drawer; narrow screens use a full-screen panel.
+- A personified Atlas analyst character follows the user globally, including paper trading. The character anchors the floating bubble, assistant voice, and panel identity; desktop uses a polished right drawer and narrow screens use a full-screen panel.
 - The assistant carries one local session across page navigation and receives bounded route context (path and ticker), so a user can ask “what changed?” from a company page without restating the ticker.
 - Research questions are planned by GPT-5.6 Terra through strict typed read tools over existing services. The model never receives database credentials and cannot submit SQL.
 - Company overview, statements, cash-flow quality, valuation, price history, comparison, screening, filings, market context, strategies, accounts, and account performance are available through bounded tools.

@@ -2,8 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
-import AtlasMark from "@/components/AtlasMark";
 import { ApiError } from "@/lib/api";
 import {
   AssistantBudget,
@@ -32,6 +32,23 @@ function Icon({ name, size = 18 }: { name: "sparkles" | "send" | "close" | "new"
     source: <path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" />,
   };
   return <svg viewBox="0 0 24 24" width={size} height={size} fill={name === "sparkles" || name === "send" ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
+
+function ResearchAvatar({ size, alt = "" }: { size: number; alt?: string }) {
+  return (
+    <span className="atlas-research-avatar" style={{ width: size, height: size }}>
+      <Image
+        src="/atlas-ai-analyst.png"
+        alt={alt}
+        width={size}
+        height={size}
+        sizes={`${size}px`}
+        className="h-full w-full object-cover"
+        priority={size >= 60}
+        unoptimized
+      />
+    </span>
+  );
 }
 
 function InlineText({ text }: { text: string }) {
@@ -134,7 +151,7 @@ function Message({ message }: { message: AssistantMessage }) {
       <div className={assistant ? "w-full" : "max-w-[88%]"}>
         {assistant && (
           <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">
-            <AtlasMark size={15} /> Atlas Research
+            <ResearchAvatar size={17} /> Atlas Research
           </div>
         )}
         <div className={`${assistant ? "atlas-assistant-answer" : "atlas-user-message"} ${message.error ? "!border-negative/50 !bg-negative/10" : ""}`}>
@@ -306,10 +323,12 @@ export default function GlobalResearchAssistant() {
         title="Open Atlas Research (⌘J)"
       >
         <span className="atlas-launcher-glow" />
-        <AtlasMark size={32} title="Atlas Research" />
-        <span className="hidden text-left sm:block">
-          <span className="block text-[11px] font-semibold text-white">Ask Atlas</span>
-          <span className="block text-[9px] text-white/55">Research anything</span>
+        <span className="atlas-launcher-avatar"><ResearchAvatar size={62} /></span>
+        <span className="atlas-launcher-spark"><Icon name="sparkles" size={11} /></span>
+        <span className="atlas-launcher-presence" />
+        <span className="atlas-launcher-copy" aria-hidden="true">
+          <strong>Ask Atlas</strong>
+          <small>Your AI research analyst</small>
         </span>
       </button>
 
@@ -317,8 +336,8 @@ export default function GlobalResearchAssistant() {
       <aside className={`atlas-assistant-panel ${open ? "is-open" : ""}`} aria-hidden={!open} aria-label="Atlas Research assistant">
         <header className="atlas-assistant-header">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04]">
-              <AtlasMark size={28} title="" />
+            <div className="atlas-header-avatar">
+              <ResearchAvatar size={42} />
               <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#111118] bg-positive" />
             </div>
             <div className="min-w-0">
@@ -360,8 +379,8 @@ export default function GlobalResearchAssistant() {
           )}
           {!connecting && !connectionError && messages.length === 0 && (
             <div className="atlas-assistant-welcome">
-              <div className="atlas-welcome-orbit"><Icon name="sparkles" size={22} /></div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-accent-2">Your Atlas research layer</p>
+              <div className="atlas-welcome-avatar"><ResearchAvatar size={78} alt="Atlas AI analyst" /></div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-accent-2">Your Atlas research analyst</p>
               <h3 className="mt-2 font-serif text-2xl font-semibold leading-tight text-white">Ask the whole platform.</h3>
               <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-muted">
                 Compare companies, interpret financial statements, test valuation logic, screen the tracked universe, or examine price risk—without hunting through tabs.
