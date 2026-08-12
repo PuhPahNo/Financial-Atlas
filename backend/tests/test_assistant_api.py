@@ -1,12 +1,20 @@
 from datetime import date
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.main import app
-from app.paper_trading import accounts as account_service
+from app.jobs import isolated_backtests
+from app.paper_trading import service as paper_service
 from auth_helpers import authenticate
 
 client = authenticate(TestClient(app))
+
+
+@pytest.fixture(autouse=True)
+def in_process_assistant_backtests(monkeypatch):
+    """Keep assistant contracts deterministic; process behavior has focused tests."""
+    monkeypatch.setattr(isolated_backtests, "run_backtest", paper_service.run_backtest)
 
 
 def _create_strategy(name: str, category: str = "long_term") -> dict:
@@ -144,7 +152,14 @@ def test_assistant_account_performance_is_read_only(monkeypatch):
             ],
         }
 
-    monkeypatch.setattr(account_service, "execute_backtest", fake_backtest)
+    monkeypatch.setattr(
+        isolated_backtests,
+        "run_account_sleeve",
+        lambda strategy, tickers, start, end, cash: fake_backtest(
+            strategy=strategy, tickers=tickers, start_date=start, end_date=end,
+            starting_cash=cash,
+        ),
+    )
 
     session_id = client.post("/api/v1/assistant/sessions", json={"title": "Test Performance Chat"}).json()["data"]["session"]["id"]
     reply = client.post(

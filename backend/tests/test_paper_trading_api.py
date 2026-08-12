@@ -6,6 +6,7 @@ import pytest
 
 from app.main import app
 from app.backtesting import engine
+from app.jobs import isolated_backtests
 from app.paper_trading import accounts as account_service
 from app.paper_trading import service as paper_service
 from app.providers.base import Quote
@@ -22,6 +23,10 @@ def fixture_service_backtests(monkeypatch):
         "execute_backtest",
         partial(engine.run_backtest, use_fixture_data=True),
     )
+    # HTTP contract tests keep execution in-process; dedicated isolation tests
+    # exercise the real child boundary without network/provider calls.
+    monkeypatch.setattr(isolated_backtests, "run_backtest", paper_service.run_backtest)
+    monkeypatch.setattr(isolated_backtests, "run_parameter_sweep", paper_service.run_parameter_sweep)
 
 
 def test_seeded_categories_include_models():
@@ -437,7 +442,13 @@ def test_account_performance_attribution_reconciles(monkeypatch):
             "warnings": [],
         }
 
-    monkeypatch.setattr(account_service, "execute_backtest", fake_backtest)
+    monkeypatch.setattr(
+        isolated_backtests,
+        "run_account_sleeve",
+        lambda strategy, _tickers, start, end, cash: fake_backtest(
+            strategy=strategy, start_date=start, end_date=end, starting_cash=cash,
+        ),
+    )
     res = client.get(
         f"/api/v1/paper-trading/accounts/{account['id']}/performance?start=2020-01-01&end=2020-01-05"
     )

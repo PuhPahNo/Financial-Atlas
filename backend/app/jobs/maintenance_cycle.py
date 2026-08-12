@@ -8,6 +8,7 @@ next model on the 512 MB web instance.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 from pathlib import Path
@@ -33,17 +34,17 @@ def _peak_rss_mb() -> float:
     return round(usage / divisor, 1)
 
 
-def _run_warm() -> dict:
+def _run_warm(*, years: int, include_fundamentals: bool) -> dict:
     # Import only after the cross-process lock is held. A child waiting behind an
     # interactive backtest should remain a tiny Python process, not preload the full
     # backtesting/provider graph while another heavy workload is resident.
     from . import warm_prices
-    return warm_prices.run()
+    return warm_prices.run(years=years, include_fundamentals=include_fundamentals)
 
 
-def _run_headline(strategy_id: int) -> dict:
+def _run_headline(strategy_id: int, *, years: int) -> dict:
     from . import refresh_headlines
-    return refresh_headlines.run_one(strategy_id)
+    return refresh_headlines.run_one(strategy_id, years=years)
 
 
 def _run_prune() -> int:
@@ -51,7 +52,14 @@ def _run_prune() -> int:
     return refresh_headlines.prune()
 
 
-def run(reason: str, phase: str, *, strategy_id: int | None = None) -> dict:
+def run(
+    reason: str,
+    phase: str,
+    *,
+    strategy_id: int | None = None,
+    years: int | None = None,
+    include_fundamentals: bool = True,
+) -> dict:
     if phase == "headline" and strategy_id is None:
         raise ValueError("headline maintenance requires --strategy-id")
     if phase != "headline" and strategy_id is not None:
@@ -62,9 +70,14 @@ def run(reason: str, phase: str, *, strategy_id: int | None = None) -> dict:
     log.info("maintenance child (%s/%s) started: peak_rss_mb=%s", reason, phase, _peak_rss_mb())
     with heavy_work_lock():
         if phase == "warm":
-            result["warmed"] = _run_warm()
+            result["warmed"] = _run_warm(
+                years=25 if years is None else years,
+                include_fundamentals=include_fundamentals,
+            )
         elif phase == "headline":
-            result["refreshed"] = _run_headline(strategy_id)
+            result["refreshed"] = _run_headline(
+                strategy_id, years=3 if years is None else years,
+            )
         elif phase == "prune":
             result["pruned_runs"] = _run_prune()
         else:  # Defensive for direct Python callers; argparse validates CLI calls.
@@ -81,10 +94,21 @@ def main() -> int:
     parser.add_argument("--reason", default="manual")
     parser.add_argument("--phase", choices=("warm", "headline", "prune"), required=True)
     parser.add_argument("--strategy-id", type=int)
+    parser.add_argument("--years", type=int)
+    parser.add_argument("--skip-fundamentals", action="store_true")
+    parser.add_argument("--output-json")
     args = parser.parse_args()
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
     try:
-        run(args.reason, args.phase, strategy_id=args.strategy_id)
+        result = run(
+            args.reason,
+            args.phase,
+            strategy_id=args.strategy_id,
+            years=args.years,
+            include_fundamentals=not args.skip_fundamentals,
+        )
+        if args.output_json:
+            Path(args.output_json).write_text(json.dumps(result), encoding="utf-8")
         return 0
     except Exception:  # noqa: BLE001 — the parent records the failed child and remains healthy
         log.exception("maintenance child (%s/%s) failed", args.reason, args.phase)

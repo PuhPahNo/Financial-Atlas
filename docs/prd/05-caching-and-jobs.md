@@ -65,8 +65,8 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 | --- | --- | --- |
 | `warm_prices` | nightly at configured UTC hour | warm adjusted prices + PIT fundamentals; deep-refresh a rotating slice |
 | `refresh_headlines` | after `warm_prices` | recompute active strategy headline backtests and prune old runs |
-| live account marks | about every 60s while market is open | pre-warm authenticated trader values |
-| queued backtest worker | continuous | execute one memory-heavy queued run at a time |
+| live account marks | about every 60s while market is open | pre-warm authenticated trader values; isolate each uncached sleeve backtest |
+| queued backtest worker | continuous | launch one memory-heavy queued run at a time in a fresh child |
 
 - Local and Render use the same FastAPI lifespan scheduler inside the single web service. Nightly
   warming runs in one disposable child, then every headline strategy runs in its own fresh child.
@@ -75,6 +75,10 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
   second strategy. It does not provision another Render service, worker, or Cron Job.
 - Active screening backtests and maintenance phases share a cross-process lock, so memory-heavy
   scans queue instead of overlapping on the 512 MB service.
+- Interactive synchronous/assistant backtests use a database-backed child while preserving their
+  response contract. Parameter sweeps and account performance/holdings use one child per value or
+  sleeve, so allocator high-water memory never transfers to the long-lived FastAPI process or the
+  next simulation.
 - Jobs are idempotent/best-effort and log counts fetched, skipped, and failed.
 
 ## 7. Dependencies

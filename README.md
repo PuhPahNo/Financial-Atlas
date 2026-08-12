@@ -30,10 +30,10 @@ The user-facing product name is **Atlas**. The repository and internal docs stil
 
 Deployment to **Render** is wired for one Docker web service plus managed Postgres. The container
 runs the Next.js frontend on Render's public port and the FastAPI backend privately on
-`127.0.0.1:8000`. Memory-heavy nightly work runs sequentially as disposable processes inside that
-same Starter service. Price warming gets one child, and each headline strategy gets its own child
-so full-universe heaps are released between models. This does not require another worker, Cron Job,
-or plan upgrade.
+`127.0.0.1:8000`. Memory-heavy work runs sequentially as disposable processes inside that same
+Starter service. Queued, synchronous, assistant, sweep-value, account-sleeve, warm, and headline
+backtests all release full-universe heaps when their child exits. This does not require another
+worker, Cron Job, or plan upgrade.
 
 ## Architecture
 

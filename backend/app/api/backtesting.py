@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from ..core.deps import require_paper_trading_access
+from ..jobs import isolated_backtests
 from ..paper_trading import service
 from ..paper_trading.schemas import BacktestRequest, ParameterSweepRequest
 from .responses import derived_envelope as envelope
@@ -12,18 +13,18 @@ router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_paper_trading
 
 @router.post("/backtests")
 def run_backtest(payload: BacktestRequest):
-    """Run a backtest. With queue=true the run is enqueued for the in-process worker
+    """Run a backtest. With queue=true the run is enqueued for the child coordinator
     and returned immediately with status="queued" — poll GET /backtests/{id}. The
     synchronous form stays for scripts/tests but dies at proxy timeouts on long runs."""
     if payload.queue:
         return envelope(service.enqueue_backtest(payload))
-    result = service.run_backtest(payload)
+    result = isolated_backtests.run_backtest(payload)
     return envelope(result, served_by=result.get("served_by", "derived"))
 
 
 @router.post("/backtests/sweep")
 def run_parameter_sweep(payload: ParameterSweepRequest):
-    return envelope(service.run_parameter_sweep(payload))
+    return envelope(isolated_backtests.run_parameter_sweep(payload))
 
 
 @router.get("/backtests")
@@ -47,13 +48,13 @@ def cancel_backtest(run_id: int):
 def warm_backtest_data(years: int = 25, include_fundamentals: bool = True):
     """Pre-fill the durable price store + PIT fundamentals for the investable superset
     so subsequent backtests run from local data (best-effort, long-running)."""
-    from ..jobs import warm_prices
-    return envelope(warm_prices.run(years=years, include_fundamentals=include_fundamentals))
+    return envelope(isolated_backtests.warm_backtest_data(
+        years=years, include_fundamentals=include_fundamentals,
+    ))
 
 
 @router.post("/backtests/refresh-headlines")
 def refresh_headlines(years: int = 3):
     """Re-run every active strategy's headline backtest with the current engine and
     persist it onto the card (best-effort, long-running). Run after /backtests/warm."""
-    from ..jobs import refresh_headlines as job
-    return envelope(job.run(years=years))
+    return envelope(isolated_backtests.refresh_headlines(years=years))

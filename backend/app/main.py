@@ -19,7 +19,8 @@ from .core import market_hours
 from .core.config import settings
 from .core.errors import AtlasError
 from .db import init_db
-from .paper_trading import accounts
+from .jobs import isolated_backtests
+from .paper_trading import accounts, service as pt_service
 
 logging.basicConfig(level=settings.log_level.upper())
 for noisy_logger in ("httpx", "httpcore"):
@@ -51,14 +52,13 @@ async def _live_mark_loop() -> None:
 
 
 async def _backtest_worker_loop() -> None:
-    """Single in-process worker for queued backtests (POST /backtests queue=true).
+    """Single queue coordinator for disposable backtest child processes.
 
-    One job at a time — the engine lock serializes heavy scans anyway, and a lone
-    worker keeps the 512MB instance safe. Same resilience contract as the other
-    loops: nothing here can kill it, and a restart marks interrupted jobs failed
-    instead of leaving them 'running' forever."""
+    One job at a time; each claimed run gets a fresh interpreter so full-universe
+    arrays and allocator arenas are returned to the OS on exit. A restart marks
+    interrupted jobs failed instead of leaving them 'running' forever.
+    """
     worker_log = logging.getLogger("app.backtest_worker")
-    from .paper_trading import service as pt_service
     try:
         stale = await asyncio.to_thread(pt_service.fail_interrupted_backtests)
         if stale:
@@ -72,12 +72,50 @@ async def _backtest_worker_loop() -> None:
                 await asyncio.sleep(2)
                 continue
             worker_log.info("executing queued backtest run %d", run_id)
-            await asyncio.to_thread(pt_service.execute_queued_backtest, run_id)
+            await _run_backtest_child(run_id)
         except asyncio.CancelledError:
             break
         except Exception as exc:  # noqa: BLE001 — keep the worker alive
             log.warning("backtest worker error: %s", exc)
             await asyncio.sleep(2)
+
+
+async def _run_backtest_child(run_id: int) -> bool:
+    """Execute one claimed run in a fresh interpreter and settle process failures."""
+    worker_log = logging.getLogger("app.backtest_worker")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "app.jobs.backtest_child",
+            "--run-id",
+            str(run_id),
+            env=isolated_backtests.child_environment(),
+        )
+    except OSError as exc:
+        message = f"Backtest worker could not start: {exc}"
+        pt_service.fail_backtest(run_id, message)
+        worker_log.error("queued backtest run %d failed: %s", run_id, message)
+        return False
+    try:
+        returncode = await proc.wait()
+    except asyncio.CancelledError:
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        pt_service.fail_backtest(run_id, "Backtest interrupted by service shutdown")
+        raise
+
+    if returncode == 0:
+        worker_log.info("queued backtest run %d child complete", run_id)
+        return True
+    message = isolated_backtests.process_failure(returncode)
+    pt_service.fail_backtest(run_id, message)
+    worker_log.error("queued backtest run %d failed: %s", run_id, message)
+    return False
 
 
 async def _data_maintenance_loop() -> None:

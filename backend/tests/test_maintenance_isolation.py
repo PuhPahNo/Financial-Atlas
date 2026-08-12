@@ -53,7 +53,7 @@ def test_maintenance_cycle_runs_one_headline_under_heavy_lock(monkeypatch):
     monkeypatch.setattr(
         maintenance_cycle,
         "_run_headline",
-        lambda strategy_id: events.append(("headline", strategy_id)) or {"strategy_id": strategy_id},
+        lambda strategy_id, **_kwargs: events.append(("headline", strategy_id)) or {"strategy_id": strategy_id},
     )
 
     result = maintenance_cycle.run("test", "headline", strategy_id=42)

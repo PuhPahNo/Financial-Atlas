@@ -89,9 +89,10 @@ def execute_read_tool(action: str, payload: dict) -> dict:
 
         return paper_service.validate_strategy(StrategyValidationRequest(**payload))
     if action == "run_backtest":
+        from ..jobs import isolated_backtests
         from ..paper_trading.schemas import BacktestRequest
 
-        return paper_service.run_backtest(BacktestRequest(**payload))
+        return isolated_backtests.run_backtest(BacktestRequest(**payload))
     raise ValueError(f"Unknown read tool: {action}")
 
 

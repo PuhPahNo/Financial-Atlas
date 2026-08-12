@@ -88,10 +88,10 @@ class Settings(BaseSettings):
     assistant_rate_limit_per_minute: int = 20
 
     # Live-ish paper trader valuation (PRD live-paper-valuation). The in-process refresh
-    # tick pre-warms account marks during market hours; quotes are short-cached so reads
-    # within a refresh window coalesce. Yahoo is ~15-min delayed, so faster than ~60s is
-    # pointless. Set live_mark_enabled=false to disable the background tick (read path
-    # still serves correct values on demand).
+    # tick pre-warms account marks during market hours; uncached strategy sleeves run in
+    # disposable children, and quotes are short-cached so reads within a refresh window
+    # coalesce. Yahoo is ~15-min delayed, so faster than ~60s is pointless. Set
+    # live_mark_enabled=false to disable the tick (read path still self-heals).
     live_mark_enabled: bool = True
     live_mark_interval_seconds: int = 60
     live_quote_ttl_seconds: int = 60

@@ -6,7 +6,6 @@ from __future__ import annotations
 import bisect
 from datetime import date, datetime, timezone
 
-from ..backtesting.engine import run_backtest as execute_backtest
 from ..backtesting.metrics import max_drawdown
 from ..core import cache, market_hours
 from ..core.errors import NotFoundError, ValidationError
@@ -306,13 +305,14 @@ def _account_sleeves(account_id: int) -> tuple[float, list[tuple[int, float, dic
 
 
 def _execute_sleeve(view: dict, dollars: float, start: date, end: date) -> dict:
-    return execute_backtest(
-        strategy=view,
-        tickers=normalize_tickers(view.get("parameters", {}).get("tickers", [])),
-        start_date=start,
-        end_date=end,
-        starting_cash=dollars,
-        benchmark="SPY",
+    from ..jobs import isolated_backtests
+
+    return isolated_backtests.run_account_sleeve(
+        view,
+        normalize_tickers(view.get("parameters", {}).get("tickers", [])),
+        start,
+        end,
+        dollars,
     )
 
 
