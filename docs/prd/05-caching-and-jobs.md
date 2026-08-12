@@ -69,9 +69,10 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 | queued backtest worker | continuous | execute one memory-heavy queued run at a time |
 
 - Local and Render use the same FastAPI lifespan scheduler inside the single web service. Nightly
-  warm and headline phases run sequentially in disposable child processes in that same container;
-  this returns each phase's heap to the OS and keeps an OOM-killed maintenance phase from taking the
-  API down. It does not provision another Render service, worker, or Cron Job.
+  warming runs in one disposable child, then every headline strategy runs in its own fresh child.
+  The finer process boundary returns each full-universe model's allocator heap to the OS before the
+  next model loads; phase-only isolation retained enough heap to exceed a 512 MB instance on the
+  second strategy. It does not provision another Render service, worker, or Cron Job.
 - Active screening backtests and maintenance phases share a cross-process lock, so memory-heavy
   scans queue instead of overlapping on the 512 MB service.
 - Jobs are idempotent/best-effort and log counts fetched, skipped, and failed.
@@ -97,7 +98,8 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 - TTL test: expired entry triggers refetch; fresh entry does not.
 - Stale-fallback test: upstream failure after TTL serves last-good with `stale=true`.
 - Single-flight test: N concurrent cold requests → 1 upstream call.
-- Maintenance isolation test: a child killed by a signal reports failure without terminating the API.
+- Maintenance isolation test: every headline gets a distinct child, and a child killed by a signal
+  reports failure while the parent continues with the remaining strategies and final pruning.
 
 ## 10. Open questions & assumptions
 

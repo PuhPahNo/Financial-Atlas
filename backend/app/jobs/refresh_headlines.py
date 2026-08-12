@@ -6,8 +6,10 @@ shows numbers produced by the current engine — not stale runs from before an e
 change. One strategy at a time (the engine serializes anyway); a failure on one model
 is recorded and skipped, never fatal.
 
-Run after ``warm_prices`` so index-wide models read a warm store:
-    python -m app.jobs.warm_prices && python -m app.jobs.refresh_headlines
+Production runs each strategy in a fresh maintenance child so the large Python heap
+from one index-wide model is returned to the OS before the next model starts. The
+``run`` entry point remains useful for local/manual refreshes where more memory is
+available.
 """
 from __future__ import annotations
 
@@ -25,6 +27,51 @@ log = logging.getLogger("jobs.refresh_headlines")
 # trades) per strategy per night — unbounded, that fills the small Render disk.
 _KEEP_RUNS_PER_STRATEGY = 25
 _KEEP_DAYS = 30
+
+
+def _window(years: int) -> tuple[date, date]:
+    end = date.today()
+    return end - timedelta(days=round(365.25 * years)), end
+
+
+def active_targets() -> list[tuple[int, str]]:
+    """Return the active strategy IDs/names in stable refresh order."""
+    init_db()
+    service.ensure_seeded()
+    with session_scope() as s:
+        return [
+            (row.id, row.name)
+            for row in s.query(TradingStrategy)
+            .filter_by(status="active")
+            .order_by(TradingStrategy.id)
+            .all()
+        ]
+
+
+def run_one(strategy_id: int, *, years: int = 3) -> dict:
+    """Refresh one strategy headline.
+
+    This is the production process boundary: callers launch one process per strategy,
+    so index-wide price arrays and allocator arenas cannot accumulate across the sweep.
+    Pruning is deliberately separate and runs once after every strategy child exits.
+    """
+    init_db()
+    strategy = service.get_strategy(strategy_id)["strategy"]
+    start, end = _window(years)
+    service.run_backtest(BacktestRequest(
+        strategy_id=strategy_id,
+        start_date=start,
+        end_date=end,
+        starting_cash=100000.0,
+        benchmark="SPY",
+        persist_headline=True,
+    ))
+    log.info("headline refreshed: %s", strategy["name"])
+    return {
+        "strategy_id": strategy_id,
+        "strategy": strategy["name"],
+        "window": {"start": start.isoformat(), "end": end.isoformat()},
+    }
 
 
 def prune_runs(*, keep_per_strategy: int = _KEEP_RUNS_PER_STRATEGY, keep_days: int = _KEEP_DAYS) -> int:
@@ -57,32 +104,28 @@ def prune_runs(*, keep_per_strategy: int = _KEEP_RUNS_PER_STRATEGY, keep_days: i
     return len(doomed)
 
 
-def run(*, years: int = 3) -> dict:
+def prune() -> int:
+    """Initialize the schema and prune once after a complete headline sweep."""
     init_db()
-    service.ensure_seeded()
-    end = date.today()
-    start = end - timedelta(days=round(365.25 * years))
-    with session_scope() as s:
-        targets = [(r.id, r.name) for r in
-                   s.query(TradingStrategy).filter_by(status="active").order_by(TradingStrategy.id).all()]
+    return prune_runs()
 
+
+def run(*, years: int = 3) -> dict:
+    targets = active_targets()
+    start, end = _window(years)
     refreshed: list[str] = []
     failed: list[dict] = []
     for strategy_id, name in targets:
         try:
-            service.run_backtest(BacktestRequest(
-                strategy_id=strategy_id, start_date=start, end_date=end,
-                starting_cash=100000.0, benchmark="SPY", persist_headline=True,
-            ))
+            run_one(strategy_id, years=years)
             refreshed.append(name)
-            log.info("headline refreshed: %s", name)
         except Exception as exc:  # noqa: BLE001 — one bad model must not sink the sweep
             failed.append({"strategy": name, "error": str(exc)})
             log.warning("headline refresh failed for %s: %s", name, exc)
 
     result = {"window": {"start": start.isoformat(), "end": end.isoformat()},
               "strategies": len(targets), "refreshed": len(refreshed), "failed": failed,
-              "pruned_runs": prune_runs()}
+              "pruned_runs": prune()}
     log.info("headline refresh complete: %s", {**result, "failed": len(failed)})
     return result
 

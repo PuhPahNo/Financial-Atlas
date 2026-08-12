@@ -1,8 +1,9 @@
-"""Disposable worker for the single-service nightly maintenance phases.
+"""Disposable worker for one bounded nightly-maintenance unit.
 
-The Render web process launches this module as a child. Heap accumulated while
-warming or backtesting is returned to the OS when each phase exits, and an OOM can
-preferentially kill this worker without taking the API down.
+The Render web process launches this module as a child. The warm phase gets one
+process; headline backtests get one process *per strategy*. Exiting after each unit
+returns its heap to the OS instead of carrying allocator high-water memory into the
+next model on the 512 MB web instance.
 """
 from __future__ import annotations
 
@@ -14,7 +15,6 @@ import resource
 import sys
 
 from ..core.heavy_work import lock as heavy_work_lock
-from . import refresh_headlines, warm_prices
 
 log = logging.getLogger("jobs.maintenance_cycle")
 
@@ -33,31 +33,58 @@ def _peak_rss_mb() -> float:
     return round(usage / divisor, 1)
 
 
-def run(reason: str, phase: str = "all") -> dict:
+def _run_warm() -> dict:
+    # Import only after the cross-process lock is held. A child waiting behind an
+    # interactive backtest should remain a tiny Python process, not preload the full
+    # backtesting/provider graph while another heavy workload is resident.
+    from . import warm_prices
+    return warm_prices.run()
+
+
+def _run_headline(strategy_id: int) -> dict:
+    from . import refresh_headlines
+    return refresh_headlines.run_one(strategy_id)
+
+
+def _run_prune() -> int:
+    from . import refresh_headlines
+    return refresh_headlines.prune()
+
+
+def run(reason: str, phase: str, *, strategy_id: int | None = None) -> dict:
+    if phase == "headline" and strategy_id is None:
+        raise ValueError("headline maintenance requires --strategy-id")
+    if phase != "headline" and strategy_id is not None:
+        raise ValueError("--strategy-id is valid only for the headline phase")
+
     prefer_child_for_oom_kill()
     result: dict = {"reason": reason, "phase": phase}
     log.info("maintenance child (%s/%s) started: peak_rss_mb=%s", reason, phase, _peak_rss_mb())
     with heavy_work_lock():
-        if phase in {"warm", "all"}:
-            result["warmed"] = warm_prices.run()
-            log.info("maintenance child (%s/warm) complete: peak_rss_mb=%s", reason, _peak_rss_mb())
-        if phase in {"headlines", "all"}:
-            result["refreshed"] = refresh_headlines.run()
-            log.info(
-                "maintenance child (%s/headlines) complete: peak_rss_mb=%s",
-                reason, _peak_rss_mb(),
-            )
+        if phase == "warm":
+            result["warmed"] = _run_warm()
+        elif phase == "headline":
+            result["refreshed"] = _run_headline(strategy_id)
+        elif phase == "prune":
+            result["pruned_runs"] = _run_prune()
+        else:  # Defensive for direct Python callers; argparse validates CLI calls.
+            raise ValueError(f"unknown maintenance phase: {phase}")
+        log.info(
+            "maintenance child (%s/%s) complete: peak_rss_mb=%s",
+            reason, phase, _peak_rss_mb(),
+        )
     return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reason", default="manual")
-    parser.add_argument("--phase", choices=("warm", "headlines", "all"), default="all")
+    parser.add_argument("--phase", choices=("warm", "headline", "prune"), required=True)
+    parser.add_argument("--strategy-id", type=int)
     args = parser.parse_args()
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
     try:
-        run(args.reason, args.phase)
+        run(args.reason, args.phase, strategy_id=args.strategy_id)
         return 0
     except Exception:  # noqa: BLE001 — the parent records the failed child and remains healthy
         log.exception("maintenance child (%s/%s) failed", args.reason, args.phase)

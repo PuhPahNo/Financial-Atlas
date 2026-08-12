@@ -131,49 +131,98 @@ async def _data_maintenance_loop() -> None:
             maint_log.warning("data maintenance error: %s", exc)
 
 
+def _headline_refresh_targets() -> list[tuple[int, str]]:
+    """Small parent-process query used to plan one child per active strategy."""
+    from .paper_trading import service as pt_service
+    rows = pt_service.list_strategies()["strategies"]
+    return sorted((int(row["id"]), str(row["name"])) for row in rows)
+
+
+async def _run_maintenance_child(
+    reason: str,
+    phase: str,
+    env: dict[str, str],
+    *,
+    strategy_id: int | None = None,
+    strategy_name: str | None = None,
+) -> bool:
+    """Run one bounded maintenance unit and keep failures local to that unit."""
+    maint_log = logging.getLogger("app.data_maintenance")
+    label = phase if strategy_id is None else f"headline:{strategy_id}:{strategy_name or 'unknown'}"
+    args = [
+        sys.executable, "-m", "app.jobs.maintenance_cycle",
+        "--phase", phase, "--reason", reason,
+    ]
+    if strategy_id is not None:
+        args.extend(("--strategy-id", str(strategy_id)))
+
+    maint_log.info("data maintenance (%s/%s): launching isolated child", reason, label)
+    proc = await asyncio.create_subprocess_exec(*args, env=env)
+    try:
+        returncode = await proc.wait()
+    except asyncio.CancelledError:
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        raise
+
+    if returncode == 0:
+        maint_log.info("data maintenance (%s/%s): child complete", reason, label)
+        return True
+    if returncode < 0:
+        try:
+            signal_name = signal.Signals(-returncode).name
+        except ValueError:
+            signal_name = f"signal {-returncode}"
+        maint_log.error(
+            "data maintenance (%s/%s): child terminated by %s; continuing sweep",
+            reason, label, signal_name,
+        )
+    else:
+        maint_log.error(
+            "data maintenance (%s/%s): child exited %d; continuing sweep",
+            reason, label, returncode,
+        )
+    return False
+
+
 async def _run_data_maintenance_process(reason: str) -> bool:
-    """Run warm and headline phases in disposable children on this same instance."""
+    """Warm once, then refresh each headline in a fresh same-instance child.
+
+    One full-universe headline fits on the 512 MB service, but retaining its Python
+    allocator high-water memory while loading the next one does not. A per-strategy
+    process boundary releases that heap without changing the Render plan or model
+    universe.
+    """
     maint_log = logging.getLogger("app.data_maintenance")
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("MALLOC_ARENA_MAX", "2")
     env.setdefault("MALLOC_TRIM_THRESHOLD_", "65536")
-    all_ok = True
 
-    for phase in ("warm", "headlines"):
-        maint_log.info("data maintenance (%s/%s): launching isolated child", reason, phase)
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "app.jobs.maintenance_cycle",
-            "--phase", phase, "--reason", reason,
-            env=env,
+    all_ok = await _run_maintenance_child(reason, "warm", env)
+    try:
+        targets = await asyncio.to_thread(_headline_refresh_targets)
+    except Exception as exc:  # noqa: BLE001 — keep the API alive if planning fails
+        maint_log.error("data maintenance (%s/headlines): target query failed: %s", reason, exc)
+        return False
+
+    maint_log.info("data maintenance (%s/headlines): refreshing %d strategies", reason, len(targets))
+    for strategy_id, strategy_name in targets:
+        completed = await _run_maintenance_child(
+            reason,
+            "headline",
+            env,
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
         )
-        try:
-            returncode = await proc.wait()
-        except asyncio.CancelledError:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=10)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-            raise
+        all_ok = completed and all_ok
 
-        if returncode == 0:
-            maint_log.info("data maintenance (%s/%s): child complete", reason, phase)
-            continue
-        all_ok = False
-        if returncode < 0:
-            signal_name = signal.Signals(-returncode).name
-            maint_log.error(
-                "data maintenance (%s/%s): child terminated by %s; web process remains available",
-                reason, phase, signal_name,
-            )
-        else:
-            maint_log.error(
-                "data maintenance (%s/%s): child exited %d; web process remains available",
-                reason, phase, returncode,
-            )
-    return all_ok
+    pruned = await _run_maintenance_child(reason, "prune", env)
+    return pruned and all_ok
 
 
 @asynccontextmanager
