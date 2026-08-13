@@ -2,6 +2,7 @@
 
 Synthetic, deterministic proofs that the engine scans, enters point-in-time, and exits on
 take-profit / stop-loss / max-hold, holding at most top-N."""
+from array import array
 from datetime import date, timedelta
 
 from app.backtesting import screen
@@ -27,6 +28,22 @@ def _stub(series):
 
 def _sells(res):
     return [t for t in res["trades"] if t["side"] in ("sell", "cover")]
+
+
+def test_loaded_market_series_use_shared_dates_and_c_doubles(monkeypatch):
+    monkeypatch.setattr(
+        screen.price_store,
+        "get_series",
+        lambda *_args, **_kwargs: (["2026-01-02", "2026-01-05"], [100.0, 101.0], "stub"),
+    )
+
+    first_dates, first_closes = screen._load_series("AAA", date(2026, 1, 1), date(2026, 1, 5))
+    second_dates, second_closes = screen._load_series("BBB", date(2026, 1, 1), date(2026, 1, 5))
+
+    assert isinstance(first_dates, tuple)
+    assert isinstance(first_closes, array) and first_closes.typecode == "d"
+    assert isinstance(second_closes, array)
+    assert first_dates[0] is second_dates[0]
 
 
 def test_enters_after_uptrend_then_takes_profit(monkeypatch):

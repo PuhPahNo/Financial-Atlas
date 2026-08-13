@@ -20,6 +20,7 @@ from .core.config import settings
 from .core.errors import AtlasError
 from .db import init_db
 from .jobs import isolated_backtests
+from .jobs.memory_guard import MEMORY_GUARD_EXIT_CODE
 from .paper_trading import accounts, service as pt_service
 
 logging.basicConfig(level=settings.log_level.upper())
@@ -210,6 +211,12 @@ async def _run_maintenance_child(
     if returncode == 0:
         maint_log.info("data maintenance (%s/%s): child complete", reason, label)
         return True
+    if returncode == MEMORY_GUARD_EXIT_CODE:
+        maint_log.error(
+            "data maintenance (%s/%s): memory guard stopped child; continuing sweep",
+            reason, label,
+        )
+        return False
     if returncode < 0:
         try:
             signal_name = signal.Signals(-returncode).name
@@ -230,10 +237,9 @@ async def _run_maintenance_child(
 async def _run_data_maintenance_process(reason: str) -> bool:
     """Warm once, then refresh each headline in a fresh same-instance child.
 
-    One full-universe headline fits on the 512 MB service, but retaining its Python
-    allocator high-water memory while loading the next one does not. A per-strategy
-    process boundary releases that heap without changing the Render plan or model
-    universe.
+    A per-strategy process boundary releases each heap before the next strategy.
+    Universe-window bounds reduce the individual peak, while the child memory guard
+    preserves the API if a future strategy still cannot fit this Render plan.
     """
     maint_log = logging.getLogger("app.data_maintenance")
     env = os.environ.copy()

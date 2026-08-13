@@ -11,9 +11,12 @@ import subprocess
 import sys
 import tempfile
 
-from ..core.errors import ProviderError
+from ..core.config import settings
+from ..core.errors import ProviderError, ValidationError
+from ..core import market_hours
 from ..paper_trading import service
 from ..paper_trading.schemas import BacktestRequest, ParameterSweepRequest
+from .memory_guard import MEMORY_GUARD_EXIT_CODE
 
 
 def child_environment() -> dict[str, str]:
@@ -25,6 +28,8 @@ def child_environment() -> dict[str, str]:
 
 
 def process_failure(returncode: int, worker: str = "Backtest worker") -> str:
+    if returncode == MEMORY_GUARD_EXIT_CODE:
+        return f"{worker} stopped before the service memory limit"
     if returncode < 0:
         try:
             name = signal.Signals(-returncode).name
@@ -32,6 +37,13 @@ def process_failure(returncode: int, worker: str = "Backtest worker") -> str:
             name = f"signal {-returncode}"
         return f"{worker} was terminated by {name}"
     return f"{worker} exited with status {returncode}"
+
+
+def bounded_years(years: int) -> int:
+    maximum = max(1, settings.backtest_max_window_days // 365)
+    if years < 1 or years > maximum:
+        raise ValidationError(f"Years must be between 1 and {maximum}")
+    return years
 
 
 def _run_child_sync(run_id: int) -> int:
@@ -163,6 +175,7 @@ def _run_maintenance_child_sync(
 
 
 def warm_backtest_data(*, years: int = 25, include_fundamentals: bool = True) -> dict:
+    years = bounded_years(years)
     child = _run_maintenance_child_sync(
         "warm", years=years, include_fundamentals=include_fundamentals,
     )
@@ -172,6 +185,7 @@ def warm_backtest_data(*, years: int = 25, include_fundamentals: bool = True) ->
 
 
 def refresh_headlines(*, years: int = 3) -> dict:
+    years = bounded_years(years)
     targets = sorted(
         (int(row["id"]), str(row["name"]))
         for row in service.list_strategies()["strategies"]
@@ -195,7 +209,7 @@ def refresh_headlines(*, years: int = 3) -> dict:
             "strategy": "retention prune",
             "error": process_failure(pruned.returncode, "Maintenance worker"),
         })
-    end = date.today()
+    end = market_hours.last_completed_trading_day()
     start = end - timedelta(days=round(365.25 * years))
     return {
         "window": {"start": start.isoformat(), "end": end.isoformat()},

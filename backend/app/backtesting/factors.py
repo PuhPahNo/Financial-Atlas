@@ -7,6 +7,7 @@ information can leak into a historical decision. ``bars`` is a list of dicts wit
 from __future__ import annotations
 
 import bisect
+from collections.abc import Sequence
 from datetime import date
 
 
@@ -22,29 +23,29 @@ def _iso(d) -> str:
 # (closes[:k] are visible), found once per evaluation via bisect.
 # --------------------------------------------------------------------------- #
 
-def idx_asof(dates: list[str], D) -> int:
+def idx_asof(dates: Sequence[str], D) -> int:
     """Count of bars with date <= D (so closes[:idx] are the point-in-time visible closes)."""
     return bisect.bisect_right(dates, _iso(D))
 
 
-def close_at(dates: list[str], closes: list[float], D) -> float | None:
+def close_at(dates: Sequence[str], closes: Sequence[float], D) -> float | None:
     k = bisect.bisect_right(dates, _iso(D))
     return closes[k - 1] if k > 0 else None
 
 
-def sma_at(closes: list[float], k: int, n: int) -> float | None:
+def sma_at(closes: Sequence[float], k: int, n: int) -> float | None:
     if n <= 0 or k < n:
         return None
     return sum(closes[k - n:k]) / n
 
 
-def momentum_at(closes: list[float], k: int, lookback: int) -> float | None:
+def momentum_at(closes: Sequence[float], k: int, lookback: int) -> float | None:
     if lookback <= 0 or k <= lookback or closes[k - 1 - lookback] == 0:
         return None
     return closes[k - 1] / closes[k - 1 - lookback] - 1
 
 
-def momentum_12_1_at(closes: list[float], k: int) -> float | None:
+def momentum_12_1_at(closes: Sequence[float], k: int) -> float | None:
     """Classic cross-sectional momentum (Jegadeesh & Titman): the trailing-12-month
     return *excluding the most recent month*, which mean-reverts and would otherwise
     contaminate the signal."""
@@ -55,7 +56,7 @@ def momentum_12_1_at(closes: list[float], k: int) -> float | None:
     return (1 + m12) / (1 + m1) - 1
 
 
-def volatility_at(closes: list[float], k: int, lookback: int) -> float | None:
+def volatility_at(closes: Sequence[float], k: int, lookback: int) -> float | None:
     """Daily-return standard deviation over the trailing ``lookback`` bars at index k."""
     if lookback <= 1 or k <= lookback:
         return None
@@ -68,7 +69,7 @@ def volatility_at(closes: list[float], k: int, lookback: int) -> float | None:
     return var ** 0.5
 
 
-def rsi_at(closes: list[float], k: int, n: int = 14) -> float | None:
+def rsi_at(closes: Sequence[float], k: int, n: int = 14) -> float | None:
     """Cutler's RSI (simple-average form) over the last ``n`` changes at index k."""
     if n <= 0 or k < n + 1:
         return None
@@ -86,7 +87,7 @@ def rsi_at(closes: list[float], k: int, n: int = 14) -> float | None:
     return 100.0 - 100.0 / (1.0 + rs)
 
 
-def high_proximity_at(closes: list[float], k: int, lookback: int = 252) -> float | None:
+def high_proximity_at(closes: Sequence[float], k: int, lookback: int = 252) -> float | None:
     """Latest close as a fraction of the trailing ``lookback``-bar high (1.0 = at the high)."""
     if lookback <= 0 or k < lookback:
         return None

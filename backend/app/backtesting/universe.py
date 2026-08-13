@@ -179,7 +179,7 @@ def membership_available() -> bool:
     return _membership() is not None
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=8)
 def _members_on_iso(asof_iso: str) -> frozenset[str]:
     stints = _membership()
     if stints is None:
@@ -212,3 +212,57 @@ def investable_superset() -> list[str]:
         names.add(stint["ticker"])
     names.update(_norm(t) for t in ETF_UNIVERSE)
     return sorted(names)
+
+
+def investable_between(start: date, end: date) -> list[str]:
+    """Tickers that can actually be eligible during ``[start, end]``.
+
+    Loading every company that has *ever* appeared in the index made a three-year
+    headline backtest retain roughly twice the necessary price histories. When the
+    membership source is available, stint intersection is exact and preserves the
+    point-in-time universe. If it is unavailable, degrade to today's constituents;
+    the existing integrity report discloses that survivorship fallback.
+    """
+    start_iso, end_iso = start.isoformat(), end.isoformat()
+    stints = _membership()
+    if stints is None:
+        names = {_norm(t) for t in sp500_tickers()}
+    else:
+        names = {
+            stint["ticker"]
+            for stint in stints
+            if stint["start"] <= end_iso
+            and (stint["end"] is None or stint["end"] >= start_iso)
+        }
+    names.update(_norm(t) for t in ETF_UNIVERSE)
+    return sorted(names)
+
+
+def membership_between(start: date, end: date, *, extra: set[str] | None = None):
+    """Return a bounded point-in-time membership resolver for one simulation.
+
+    The previous daily helper memoized up to 4,096 full ~500-name sets. A long
+    backtest could retain roughly 100 MB of membership containers after their
+    day had passed. Capture only the stints that intersect this run and build one
+    short-lived set per trading day instead.
+    """
+    stints = _membership()
+    if stints is None:
+        return None
+    start_iso, end_iso = start.isoformat(), end.isoformat()
+    relevant = tuple(
+        (stint["ticker"], stint["start"], stint["end"] or "9999-12-31")
+        for stint in stints
+        if stint["start"] <= end_iso
+        and (stint["end"] is None or stint["end"] >= start_iso)
+    )
+    additions = frozenset(_norm(ticker) for ticker in (extra or set()))
+
+    def resolve(asof) -> set[str]:
+        asof_iso = asof.isoformat() if isinstance(asof, date) else str(asof)[:10]
+        return {
+            ticker for ticker, joined, left in relevant
+            if joined <= asof_iso <= left
+        } | set(additions)
+
+    return resolve

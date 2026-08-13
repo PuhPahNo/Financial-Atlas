@@ -1,7 +1,7 @@
 """Backtesting API routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ..core.deps import require_paper_trading_access
 from ..jobs import isolated_backtests
@@ -45,7 +45,10 @@ def cancel_backtest(run_id: int):
 
 
 @router.post("/backtests/warm")
-def warm_backtest_data(years: int = 25, include_fundamentals: bool = True):
+def warm_backtest_data(
+    years: int = Query(default=25, ge=1, le=30),
+    include_fundamentals: bool = True,
+):
     """Pre-fill the durable price store + PIT fundamentals for the investable superset
     so subsequent backtests run from local data (best-effort, long-running)."""
     return envelope(isolated_backtests.warm_backtest_data(
@@ -54,7 +57,7 @@ def warm_backtest_data(years: int = 25, include_fundamentals: bool = True):
 
 
 @router.post("/backtests/refresh-headlines")
-def refresh_headlines(years: int = 3):
+def refresh_headlines(years: int = Query(default=3, ge=1, le=30)):
     """Re-run every active strategy's headline backtest with the current engine and
     persist it onto the card (best-effort, long-running). Run after /backtests/warm."""
     return envelope(isolated_backtests.refresh_headlines(years=years))

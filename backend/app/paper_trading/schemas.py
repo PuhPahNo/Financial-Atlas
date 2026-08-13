@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..core.config import DEFAULT_BACKTEST_MAX_TICKERS
+
 
 Category = Literal[
     "long_term",
@@ -15,6 +17,8 @@ Category = Literal[
     "income_quality",
     "risk_rotation",
 ]
+
+MAX_ACCOUNT_ALLOCATIONS = 20
 
 
 class StrategyCreate(BaseModel):
@@ -58,7 +62,7 @@ class _BacktestWindow(BaseModel):
 class BacktestRequest(_BacktestWindow):
     strategy_id: int | None = None
     strategy: StrategyCreate | None = None
-    tickers: list[str] = Field(default_factory=list)
+    tickers: list[str] = Field(default_factory=list, max_length=DEFAULT_BACKTEST_MAX_TICKERS)
     persist_headline: bool = False  # store a compact equity preview on the strategy
     # queue=True enqueues the run and returns immediately with status="queued";
     # poll GET /backtests/{id}. Long runs otherwise die at proxy timeouts
@@ -84,7 +88,7 @@ class AccountCreate(BaseModel):
     emoji: str = Field(default="🦈", max_length=8)
     bio: str = Field(default="", max_length=300)
     starting_cash: float = Field(default=100000.0, gt=0)
-    allocations: list[AllocationInput] = Field(default_factory=list)
+    allocations: list[AllocationInput] = Field(default_factory=list, max_length=MAX_ACCOUNT_ALLOCATIONS)
 
 
 class AccountUpdate(BaseModel):
@@ -92,11 +96,11 @@ class AccountUpdate(BaseModel):
     emoji: str | None = Field(default=None, max_length=8)
     bio: str | None = Field(default=None, max_length=300)
     starting_cash: float | None = Field(default=None, gt=0)
-    allocations: list[AllocationInput] | None = None
+    allocations: list[AllocationInput] | None = Field(default=None, max_length=MAX_ACCOUNT_ALLOCATIONS)
 
 
 class AccountRebalanceRequest(BaseModel):
-    allocations: list[AllocationInput] = Field(default_factory=list)
+    allocations: list[AllocationInput] = Field(default_factory=list, max_length=MAX_ACCOUNT_ALLOCATIONS)
 
 
 def normalize_tickers(tickers: list[str]) -> list[str]:

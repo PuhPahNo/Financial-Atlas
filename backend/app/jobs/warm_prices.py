@@ -18,6 +18,7 @@ from datetime import date
 
 from ..backtesting import universe as univ
 from ..backtesting.screen import warm_universe_for_backtests
+from ..core.config import settings
 from ..db import init_db
 
 log = logging.getLogger("jobs.warm_prices")
@@ -45,6 +46,9 @@ def _deep_refresh_rotation(count: int) -> int:
 
 
 def run(*, years: int = 25, include_fundamentals: bool = True, deep_refresh_count: int = 60) -> dict:
+    maximum_years = max(1, settings.backtest_max_window_days // 365)
+    if years < 1 or years > maximum_years:
+        raise ValueError(f"years must be between 1 and {maximum_years}")
     init_db()
     superset = univ.investable_superset()
     result = warm_universe_for_backtests(superset, years=years, include_fundamentals=include_fundamentals)
@@ -55,4 +59,6 @@ def run(*, years: int = 25, include_fundamentals: bool = True, deep_refresh_coun
 
 if __name__ == "__main__":
     logging.basicConfig(level="INFO")
-    print(run())
+    from .isolated_backtests import warm_backtest_data
+
+    print(warm_backtest_data())

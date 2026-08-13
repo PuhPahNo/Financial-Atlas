@@ -11,7 +11,9 @@ snapshots for instants); quarterly from 10-Q discrete-quarter durations.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from datetime import date
+import threading
 
 from ..core import cache
 from ..core.config import settings
@@ -32,7 +34,9 @@ from .base import (
 OPEN_MARKET_CODES = {"P", "S"}
 _UA = {"User-Agent": settings.sec_user_agent}
 _TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
-_FACTS_MEM: dict[str, dict] = {}  # in-memory parsed companyfacts (per-process)
+_MAX_FACTS_IN_MEMORY = 2
+_FACTS_MEM: OrderedDict[str, dict] = OrderedDict()
+_FACTS_ACCESS_LOCK = threading.RLock()
 
 
 # --- concept tag maps (ordered by preference) ------------------------------
@@ -135,31 +139,40 @@ class SecEdgarProvider:
     def _companyfacts(self, cik: str) -> dict:
         # In-memory cache of the parsed 3.7MB facts so the several per-page
         # endpoints don't each re-read + re-parse it from disk (latency).
-        cached = _FACTS_MEM.get(cik)
-        if cached is not None:
-            return cached
+        with _FACTS_ACCESS_LOCK:
+            cached = _FACTS_MEM.get(cik)
+            if cached is not None:
+                _FACTS_MEM.move_to_end(cik)
+                return cached
 
-        def load():
-            return get_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json", headers=_UA, provider=self.name)
+            # Evict before reading/parsing another multi-megabyte document so the
+            # transient miss does not coexist with an already-full cache.
+            while len(_FACTS_MEM) >= _MAX_FACTS_IN_MEMORY:
+                _FACTS_MEM.popitem(last=False)
 
-        data = cache.get_or_set("edgar", f"facts:{cik}", ttl_seconds=7 * 86400, loader=load).value
-        # Each parsed companyfacts is large (raw ~3.7MB, much bigger in RAM). Keep only a
-        # few in memory at once — a universe-wide backtest touches hundreds of tickers, and
-        # holding 40 parsed-facts blobs was a primary cause of 512MB OOM kills.
-        if len(_FACTS_MEM) >= 4:
-            _FACTS_MEM.clear()
-        _FACTS_MEM[cik] = data
-        return data
+            def load():
+                return get_json(
+                    f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json",
+                    headers=_UA,
+                    provider=self.name,
+                )
+
+            data = cache.get_or_set(
+                "edgar", f"facts:{cik}", ttl_seconds=7 * 86400, loader=load,
+            ).value
+            _FACTS_MEM[cik] = data
+            return data
 
     def _shares_outstanding(self, cik: str) -> float | None:
-        facts = self._companyfacts(cik).get("facts", {})
-        entries = _entries(facts, ["EntityCommonStockSharesOutstanding"])
-        latest = None
-        for e in entries:
-            if e.get("val") and e.get("end"):
-                if latest is None or e["end"] > latest[0]:
-                    latest = (e["end"], e["val"])
-        return float(latest[1]) if latest else None
+        with _FACTS_ACCESS_LOCK:
+            facts = self._companyfacts(cik).get("facts", {})
+            entries = _entries(facts, ["EntityCommonStockSharesOutstanding"])
+            latest = None
+            for e in entries:
+                if e.get("val") and e.get("end"):
+                    if latest is None or e["end"] > latest[0]:
+                        latest = (e["end"], e["val"])
+            return float(latest[1]) if latest else None
 
     # -- statements ----------------------------------------------------------
     # ``point_in_time=True`` returns the *originally filed* value for each period
@@ -169,8 +182,9 @@ class SecEdgarProvider:
     # current-state analysis in the UI.
     def get_income_statements(self, ticker: str, *, period: Period = Period.ANNUAL,
                               point_in_time: bool = False) -> list[IncomeStatement]:
-        facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
-        rows = _build_periods(facts, INCOME_TAGS, period, instant=False, point_in_time=point_in_time)
+        with _FACTS_ACCESS_LOCK:
+            facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
+            rows = _build_periods(facts, INCOME_TAGS, period, instant=False, point_in_time=point_in_time)
         out: list[IncomeStatement] = []
         for key, data in rows.items():
             fy, p = key
@@ -181,8 +195,9 @@ class SecEdgarProvider:
 
     def get_balance_sheets(self, ticker: str, *, period: Period = Period.ANNUAL,
                            point_in_time: bool = False) -> list[BalanceSheet]:
-        facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
-        rows = _build_periods(facts, BALANCE_TAGS, period, instant=True, point_in_time=point_in_time)
+        with _FACTS_ACCESS_LOCK:
+            facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
+            rows = _build_periods(facts, BALANCE_TAGS, period, instant=True, point_in_time=point_in_time)
         out: list[BalanceSheet] = []
         for (fy, p), data in rows.items():
             st, lt = data.get("short_term_debt"), data.get("long_term_debt")
@@ -193,8 +208,9 @@ class SecEdgarProvider:
 
     def get_cash_flows(self, ticker: str, *, period: Period = Period.ANNUAL,
                        point_in_time: bool = False) -> list[CashFlowStatement]:
-        facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
-        rows = _build_periods(facts, CASHFLOW_TAGS, period, instant=False, point_in_time=point_in_time)
+        with _FACTS_ACCESS_LOCK:
+            facts = self._companyfacts(self.resolve_cik(ticker)["cik"]).get("facts", {})
+            rows = _build_periods(facts, CASHFLOW_TAGS, period, instant=False, point_in_time=point_in_time)
         out: list[CashFlowStatement] = []
         for (fy, p), data in rows.items():
             ocf, capex = data.get("operating_cash_flow"), data.get("capital_expenditures")

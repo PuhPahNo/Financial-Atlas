@@ -253,7 +253,9 @@ def deep_refresh(ticker: str) -> bool:
         return False
     start = date.fromisoformat(stored["dates"][0]) if stored else date(2000, 1, 1)
     try:
-        dates, closes, source = _fetch(tk, start, date.today())
+        from ..core import market_hours
+
+        dates, closes, source = _fetch(tk, start, market_hours.last_completed_trading_day())
     except Exception as exc:  # noqa: BLE001 — keep the stored series on provider failure
         _record_refresh_failure(tk, "deep refresh", exc)
         return False

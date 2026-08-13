@@ -25,11 +25,15 @@ entry-vs-price term, keeping net liquidation conserved.
 """
 from __future__ import annotations
 
+from array import array
 from bisect import bisect_left
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
+import sys
 
-from ..core import cache
+from ..core import cache, market_hours
+from ..core.config import settings
 from ..core.errors import ValidationError
 from ..core.heavy_work import lock as heavy_work_lock
 from ..services import price_store
@@ -97,11 +101,14 @@ def _num(value, fallback: float) -> float:
         return fallback
 
 
-def _load_series(sym: str, warmup_start: date, end_date: date) -> tuple[list[str], list[float]]:
+def _load_series(sym: str, warmup_start: date, end_date: date) -> tuple[tuple[str, ...], array]:
     """A ticker's daily history as compact ascending (dates, adjusted closes) arrays,
     served from the durable price store (network only for never-seen bars)."""
     dates, closes, _ = price_store.get_series(sym, warmup_start, end_date)
-    return dates, closes
+    # All tickers share the same trading-day strings; interning them avoids keeping
+    # hundreds of thousands of duplicate Python strings. C doubles use 8 bytes
+    # instead of one Python float object plus a list pointer per close.
+    return tuple(sys.intern(day) for day in dates), array("d", closes)
 
 
 # --------------------------------------------------------------------------- #
@@ -285,7 +292,7 @@ def uses_fundamentals(category: str, params: dict) -> bool:
     return category in _FUNDAMENTAL_CATEGORIES
 
 
-def eligible(category: str, params: dict, ticker: str, d, dates: list[str], closes: list[float]):
+def eligible(category: str, params: dict, ticker: str, d, dates: Sequence[str], closes: Sequence[float]):
     """Point-in-time eligibility for one candidate at date d → (ok, score, direction).
     Uses only closes dated on/before d (and, for fundamental models, filings filed by d)."""
     k = factors.idx_asof(dates, d)
@@ -362,7 +369,7 @@ def warm_universe_for_backtests(universe: list[str] | None = None, *, end_date: 
     of issuing hundreds of cold provider calls. Never raises."""
     from .universe import sp500_tickers
     universe = universe or sp500_tickers()
-    end_date = end_date or date.today()
+    end_date = end_date or market_hours.last_completed_trading_day()
     warmup_start = date(max(1962, end_date.year - years), 1, 1)
     prices_ok = funds_ok = 0
     for t in universe:
@@ -402,6 +409,7 @@ def _active_config(strategy: dict, transaction_cost_bps: float, slippage_bps: fl
             top_n = max(1, int(params.get("max_positions") or 15))
         except (TypeError, ValueError):
             top_n = 15
+    top_n = min(top_n, max(1, settings.backtest_max_positions))
     return _ActiveConfig(
         category=category,
         params=params,
@@ -419,8 +427,8 @@ def _load_active_market_data(
     end_date: date,
     benchmark: str,
     warnings: list[str],
-) -> tuple[dict[str, tuple[list[str], list[float]]], list[str], list[float]]:
-    series: dict[str, tuple[list[str], list[float]]] = {}
+) -> tuple[dict[str, tuple[Sequence[str], Sequence[float]]], Sequence[str], Sequence[float]]:
+    series: dict[str, tuple[Sequence[str], Sequence[float]]] = {}
     for ticker in universe:
         if _is_dead(ticker):
             continue
@@ -441,8 +449,8 @@ def _load_active_market_data(
             f"history in this window (delisted or provider gaps): {shown}"
         )
 
-    benchmark_dates: list[str] = []
-    benchmark_closes: list[float] = []
+    benchmark_dates: Sequence[str] = ()
+    benchmark_closes: Sequence[float] = ()
     if benchmark:
         try:
             benchmark_dates, benchmark_closes = _load_series(benchmark, warmup_start, end_date)
@@ -452,7 +460,7 @@ def _load_active_market_data(
 
 
 def _active_calendar(
-    series: dict[str, tuple[list[str], list[float]]],
+    series: dict[str, tuple[Sequence[str], Sequence[float]]],
     start_date: date,
     end_date: date,
 ) -> list[date]:
@@ -474,11 +482,11 @@ class _ActiveSimulation:
         self,
         *,
         config: _ActiveConfig,
-        series: dict[str, tuple[list[str], list[float]]],
+        series: dict[str, tuple[Sequence[str], Sequence[float]]],
         starting_cash: float,
         membership_on,
-        benchmark_dates: list[str],
-        benchmark_closes: list[float],
+        benchmark_dates: Sequence[str],
+        benchmark_closes: Sequence[float],
         first_day: date,
         warnings: list[str],
     ) -> None:

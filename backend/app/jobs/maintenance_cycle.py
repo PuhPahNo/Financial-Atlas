@@ -16,6 +16,8 @@ import resource
 import sys
 
 from ..core.heavy_work import lock as heavy_work_lock
+from ..core.config import settings
+from .memory_guard import arm_cgroup_memory_guard
 
 log = logging.getLogger("jobs.maintenance_cycle")
 
@@ -64,8 +66,13 @@ def run(
         raise ValueError("headline maintenance requires --strategy-id")
     if phase != "headline" and strategy_id is not None:
         raise ValueError("--strategy-id is valid only for the headline phase")
+    if years is not None:
+        maximum_years = max(1, settings.backtest_max_window_days // 365)
+        if years < 1 or years > maximum_years:
+            raise ValueError(f"years must be between 1 and {maximum_years}")
 
     prefer_child_for_oom_kill()
+    arm_cgroup_memory_guard(f"maintenance {reason}/{phase}")
     result: dict = {"reason": reason, "phase": phase}
     log.info("maintenance child (%s/%s) started: peak_rss_mb=%s", reason, phase, _peak_rss_mb())
     with heavy_work_lock():

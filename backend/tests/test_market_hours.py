@@ -41,3 +41,13 @@ def test_last_trading_day_skips_weekend():
 def test_last_trading_day_skips_holiday():
     # 2026-07-04 (Sat) -> back past the 07-03 holiday to Thu 07-02.
     assert m.last_trading_day(_utc("2026-07-04T12:00")).isoformat() == "2026-07-02"
+
+
+def test_last_completed_trading_day_uses_prior_session_before_delayed_close():
+    assert m.last_completed_trading_day(_utc("2026-06-04T12:00")).isoformat() == "2026-06-03"
+    assert m.last_completed_trading_day(_utc("2026-06-04T20:14")).isoformat() == "2026-06-03"
+    assert m.last_completed_trading_day(_utc("2026-06-04T20:15")).isoformat() == "2026-06-04"
+
+
+def test_last_completed_trading_day_skips_weekend_and_holiday():
+    assert m.last_completed_trading_day(_utc("2026-07-06T12:00")).isoformat() == "2026-07-02"

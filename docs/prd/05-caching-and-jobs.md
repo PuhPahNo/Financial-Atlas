@@ -75,10 +75,20 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
   second strategy. It does not provision another Render service, worker, or Cron Job.
 - Active screening backtests and maintenance phases share a cross-process lock, so memory-heavy
   scans queue instead of overlapping on the 512 MB service.
+- Point-in-time index scans load only tickers whose membership stint intersects the requested
+  simulation window. Scheduled work ends at the latest completed market session, so pre-market runs
+  do not repeatedly request an unavailable same-day Yahoo tail. A cgroup headroom guard stops a
+  disposable child before total container memory reaches Render's hard limit. That controlled stop
+  leaves the prior headline in place and is an availability safeguard, not proof that every future
+  strategy will fit the current plan.
 - Interactive synchronous/assistant backtests use a database-backed child while preserving their
   response contract. Parameter sweeps and account performance/holdings use one child per value or
   sleeve, so allocator high-water memory never transfers to the long-lived FastAPI process or the
   next simulation.
+- Screener ingest/seed/warm and tracked-snapshot refreshes use the same guarded disposable-child
+  boundary. Backtest windows, loaded tickers, positions, and account sleeves have shared hard
+  ceilings; price histories use compact arrays; result persistence and retention deletion are
+  batched so ORM/query objects cannot accumulate into another service-sized peak.
 - Jobs are idempotent/best-effort and log counts fetched, skipped, and failed.
 
 ## 7. Dependencies
@@ -104,6 +114,9 @@ Keep popular/watchlisted tickers warm so user requests are cache hits.
 - Single-flight test: N concurrent cold requests → 1 upstream call.
 - Maintenance isolation test: every headline gets a distinct child, and a child killed by a signal
   reports failure while the parent continues with the remaining strategies and final pruning.
+- Memory-budget tests cover interval-bounded universe selection, request rejection before data
+  loading, completed-session scheduling, guarded data-batch isolation, and both immediate and rising
+  cgroup pressure.
 
 ## 10. Open questions & assumptions
 

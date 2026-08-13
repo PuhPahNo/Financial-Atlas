@@ -18,6 +18,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 # well-known repo defaults.
 DEV_AUTH_PASSWORD = "admin123"
 DEV_AUTH_SECRET = "dev-atlas-auth-secret-change-me"
+DEFAULT_BACKTEST_MAX_TICKERS = 900
+DEFAULT_BACKTEST_MAX_POSITIONS = 20
 
 
 class Settings(BaseSettings):
@@ -107,9 +109,16 @@ class Settings(BaseSettings):
     # Backtests scan the S&P 500 as it was on each historical date (point-in-time membership
     # reconstructed free from the published change-log). Set false to scan today's list only.
     backtest_point_in_time_membership: bool = True
-    # Safety backstop on how many tickers a single backtest scans (0 = unlimited). The engine
-    # is memory-lean enough for the full universe on 512MB, but this caps a pathological run.
+    # Optional narrower universe override (0 keeps the exact requested/window universe).
+    # Independent hard bounds below prevent pathological requests while preserving the
+    # normal S&P 500 + ETF research surface.
     backtest_universe_max: int = 0
+    # Hard resource bounds shared by API, assistant, queue, sweep, account, and
+    # maintenance entry points. Thirty years covers Atlas's intended long-regime
+    # research without allowing an accidental century-wide full-index allocation.
+    backtest_max_window_days: int = 30 * 366
+    backtest_max_tickers: int = DEFAULT_BACKTEST_MAX_TICKERS
+    backtest_max_positions: int = DEFAULT_BACKTEST_MAX_POSITIONS
     @model_validator(mode="after")
     def _require_production_secrets(self) -> "Settings":
         """Fail closed: never serve production traffic on the committed dev AUTH_SECRET.
@@ -139,6 +148,12 @@ class Settings(BaseSettings):
             raise ValueError("OpenAI QA carryover must be within both carryover spend and the QA budget")
         if min(self.openai_max_output_tokens, self.openai_max_tool_rounds, self.openai_timeout_seconds) <= 0:
             raise ValueError("OpenAI output, tool-round, and timeout limits must be positive")
+        if min(
+            self.backtest_max_window_days,
+            self.backtest_max_tickers,
+            self.backtest_max_positions,
+        ) <= 0:
+            raise ValueError("Backtest resource bounds must be positive")
         if self.env.lower() not in {"production", "prod", "staging"} or not self.auth_required:
             return self
         missing = []

@@ -48,6 +48,18 @@ services:
         value: 512
       - key: CACHE_MIN_FREE_MB
         value: 128
+      # Disposable heavy workers self-stop while this much cgroup headroom remains,
+      # preventing a single future workload from restarting the whole web service.
+      - key: HEAVY_CHILD_MEMORY_RESERVE_MB
+        value: 96
+      - key: HEAVY_CHILD_MEMORY_POLL_SECONDS
+        value: 0.05
+      - key: BACKTEST_MAX_WINDOW_DAYS
+        value: 10980
+      - key: BACKTEST_MAX_TICKERS
+        value: 900
+      - key: BACKTEST_MAX_POSITIONS
+        value: 20
       - key: SEC_USER_AGENT
         sync: false
       - key: AUTH_USERNAME

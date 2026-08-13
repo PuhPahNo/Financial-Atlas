@@ -8,6 +8,7 @@ from typing import Any
 
 from ..core.config import settings
 from ..core.errors import NotFoundError, ValidationError
+from ..core import market_hours
 from ..core.matching import best_name_match
 from ..db import _now, session_scope
 from ..models.assistant import AssistantMessage, AssistantPendingAction, AssistantSession
@@ -801,8 +802,8 @@ def _backtest_window(message: str) -> tuple[date, date, str]:
     if yr:
         y = int(yr.group(0))
         return date(y, 1, 1), date(y, 12, 31), str(y)
-    today = date.today()
-    return date(today.year - 3, today.month, 1), today, "the last 3 years"
+    end = market_hours.last_completed_trading_day()
+    return date(end.year - 3, end.month, 1), end, "the last 3 years"
 
 
 def _resume_intent(message: str) -> bool:

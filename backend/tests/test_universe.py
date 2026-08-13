@@ -72,3 +72,45 @@ def test_investable_superset_includes_etfs_and_removed_names(monkeypatch):
     sup = set(universe.investable_superset())
     assert {"A", "B", "Z"} <= sup          # current + a since-removed name
     assert {"SPY", "TLT", "QQQ"} <= sup    # ETFs folded in
+
+
+def test_investable_between_excludes_stints_outside_requested_window(monkeypatch):
+    monkeypatch.setattr(universe, "_membership", lambda: [
+        {"ticker": "OLD", "start": "2000-01-01", "end": "2010-12-31"},
+        {"ticker": "LEFT", "start": "2020-01-01", "end": "2023-06-30"},
+        {"ticker": "JOINED", "start": "2024-02-01", "end": None},
+        {"ticker": "FUTURE", "start": "2027-01-01", "end": None},
+    ])
+
+    names = set(universe.investable_between(date(2023, 1, 1), date(2026, 1, 1)))
+
+    assert {"LEFT", "JOINED", "SPY", "QQQ"} <= names
+    assert {"OLD", "FUTURE"}.isdisjoint(names)
+
+
+def test_investable_between_degrades_to_current_names(monkeypatch):
+    monkeypatch.setattr(universe, "_membership", lambda: None)
+    monkeypatch.setattr(universe, "sp500_tickers", lambda: ["A", "B"])
+
+    names = set(universe.investable_between(date(2020, 1, 1), date(2021, 1, 1)))
+
+    assert {"A", "B", "SPY"} <= names
+
+
+def test_membership_between_captures_only_relevant_stints_without_daily_retention(monkeypatch):
+    calls = []
+    monkeypatch.setattr(universe, "_membership", lambda: calls.append("load") or [
+        {"ticker": "OLD", "start": "2000-01-01", "end": "2010-12-31"},
+        {"ticker": "LEFT", "start": "2020-01-01", "end": "2023-06-30"},
+        {"ticker": "JOINED", "start": "2024-02-01", "end": None},
+    ])
+
+    resolver = universe.membership_between(
+        date(2023, 1, 1), date(2026, 1, 1), extra={"SPY"},
+    )
+
+    assert calls == ["load"]
+    assert resolver(date(2023, 3, 1)) == {"LEFT", "SPY"}
+    assert resolver(date(2025, 3, 1)) == {"JOINED", "SPY"}
+    assert calls == ["load"]  # no cache-file reparse for each simulation day
+    assert universe._members_on_iso.cache_info().maxsize == 8

@@ -45,4 +45,6 @@ def run(*, include_default: bool = False) -> dict:
 
 if __name__ == "__main__":
     logging.basicConfig(level="INFO")
-    print(run())
+    from .isolated_data import refresh_snapshots
+
+    print(refresh_snapshots())

@@ -13,7 +13,13 @@ from ..core.matching import best_name_match
 from ..db import session_scope
 from ..models.paper_trading import AccountAllocation, TraderAccount, TradingStrategy
 from ..services import prices
-from .schemas import AccountCreate, AccountRebalanceRequest, AccountUpdate, normalize_tickers
+from .schemas import (
+    MAX_ACCOUNT_ALLOCATIONS,
+    AccountCreate,
+    AccountRebalanceRequest,
+    AccountUpdate,
+    normalize_tickers,
+)
 from .service import _strategy_view
 
 
@@ -269,8 +275,8 @@ def assign_strategy_to_account(*, account_name: str, strategy_name: str, weight:
 
 
 def _default_window() -> tuple[date, date]:
-    today = date.today()
-    return date(today.year - 3, today.month, 1), today
+    end = market_hours.last_completed_trading_day()
+    return date(end.year - 3, end.month, 1), end
 
 
 def _downsample(points: list[dict], n: int = 120) -> list[dict]:
@@ -301,6 +307,10 @@ def _account_sleeves(account_id: int) -> tuple[float, list[tuple[int, float, dic
             for allocation in account.allocations
             if allocation.strategy_id in strategies and allocation.weight > 0
         ]
+        if len(sleeves) > MAX_ACCOUNT_ALLOCATIONS:
+            raise ValidationError(
+                f"Trader accounts cannot aggregate more than {MAX_ACCOUNT_ALLOCATIONS} strategy sleeves"
+            )
     return starting_cash, sleeves
 
 
@@ -456,7 +466,7 @@ DELAYED_MINUTES = 15  # Yahoo free quotes are ~15-minute delayed.
 def _holdings_window() -> tuple[date, date]:
     """Backtest window for settled holdings — ends on the last completed trading day so the
     settled position reflects a real session close, not an in-progress bar."""
-    end = market_hours.last_trading_day()
+    end = market_hours.last_completed_trading_day()
     return date(end.year - 3, end.month, 1), end
 
 
@@ -526,7 +536,7 @@ def account_holdings(account_id: int) -> dict:
             f"{a.strategy_id}:{a.weight}" for a in sorted(account.allocations, key=lambda x: x.strategy_id)
         )
         sig = f"{float(account.starting_cash)}|{sig}"
-    key = f"{account_id}:{market_hours.last_trading_day().isoformat()}:{sig}"
+    key = f"{account_id}:{market_hours.last_completed_trading_day().isoformat()}:{sig}"
     return cache.get_or_set(
         "account_holdings", key, ttl_seconds=24 * 3600, loader=lambda: _compute_holdings(account_id)
     ).value

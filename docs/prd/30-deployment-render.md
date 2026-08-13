@@ -32,8 +32,14 @@ not evidence that a Blueprint owns the live resources.
 - `DATA_MAINTENANCE_*` and `LIVE_MARK_*` control the in-process scheduler. Nightly maintenance,
   queued/interactive/assistant backtests, sweep values, and account sleeves launch sequential child
   processes inside this web service, with allocator limits and cross-process heavy-work serialization
-  suitable for the Starter 512 MB memory budget. No additional Render worker, Cron Job, or plan
-  upgrade is required.
+  suitable for the Starter 512 MB memory budget. Screener/snapshot batches use the same process
+  boundary. Index scans load only membership stints that intersect the requested simulation window,
+  price histories use compact arrays, and result writes/retention deletes are batched. Shared hard
+  bounds reject pathological windows, universes, position counts, and account sleeves before the
+  heavy load begins. A cgroup guard preserves configured headroom by stopping a disposable child
+  before the platform's instance limit is reached. No additional Render worker or Cron Job is
+  required; if a guarded workload still cannot complete, its algorithm or the service plan must
+  change rather than claiming the headline refresh succeeded.
 
 ## 4. Deploy flow
 
@@ -79,8 +85,9 @@ Postgres CI lane today; [07](07-testing-and-quality.md) records that gap.
 - Provider keys are optional and unavailable sources degrade with explicit warnings.
 - Cache pruning reserves disk space before writes and retries after pruning.
 - Queued jobs interrupted by a deploy are marked failed on boot and can be rerun.
-- If Render kills a backtest or maintenance child for memory, the parent API remains healthy and
-  records/logs the failed unit rather than restarting the whole service.
+- If a backtest or maintenance child approaches the service memory ceiling, the in-container guard
+  stops that child while headroom remains; the parent API records/logs the failed unit, leaves prior
+  persisted output in place, and stays live.
 
 ## 9. Done criteria
 

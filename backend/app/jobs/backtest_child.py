@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..core.heavy_work import lock as heavy_work_lock
 from .maintenance_cycle import _peak_rss_mb, prefer_child_for_oom_kill
+from .memory_guard import arm_cgroup_memory_guard
 
 log = logging.getLogger("jobs.backtest_child")
 
@@ -17,6 +18,7 @@ log = logging.getLogger("jobs.backtest_child")
 def run(run_id: int) -> bool:
     """Execute exactly one running job, returning all allocated heap on exit."""
     prefer_child_for_oom_kill()
+    arm_cgroup_memory_guard(f"backtest {run_id}")
     log.info("backtest child %d started: peak_rss_mb=%s", run_id, _peak_rss_mb())
     # Acquire before importing the service/engine graph so a waiting child remains
     # tiny while maintenance or another backtest owns the instance's memory budget.
@@ -36,6 +38,7 @@ def run(run_id: int) -> bool:
 def run_ephemeral(input_json: str, output_json: str) -> bool:
     """Execute an account sleeve without adding a user-visible BacktestRun row."""
     prefer_child_for_oom_kill()
+    arm_cgroup_memory_guard("ephemeral account sleeve")
     with heavy_work_lock():
         from ..paper_trading import service
 

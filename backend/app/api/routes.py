@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from ..core.deps import require_edit_access
+from ..jobs import isolated_data
 from ..providers.base import Period
 from ..providers.registry import sec_edgar
 from ..services import company, financials, prices, snapshot
@@ -242,17 +243,17 @@ def screener_universe():
 
 @router.post("/screener/ingest", dependencies=[Depends(require_edit_access)])
 def screener_ingest(body: TickerBatchBody = TickerBatchBody()):
-    return envelope(screener_service.ingest(body.tickers))
+    return envelope(isolated_data.ingest(body.tickers))
 
 
 @router.post("/screener/seed", dependencies=[Depends(require_edit_access)])
 def screener_seed(body: SeedBody = SeedBody()):
-    return envelope(screener_service.seed_universe(body.tickers))
+    return envelope(isolated_data.seed_universe(body.tickers))
 
 
 @router.post("/screener/warm", dependencies=[Depends(require_edit_access)])
 def screener_warm(body: WarmBody = WarmBody()):
-    return envelope(screener_service.warm_universe(
+    return envelope(isolated_data.warm_universe(
         tickers=body.tickers,
         include_default=body.include_default,
     ))

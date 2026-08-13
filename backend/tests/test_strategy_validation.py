@@ -137,3 +137,27 @@ def test_fixture_data_switch_is_not_exposed_by_backtest_api():
     )
     assert res.status_code == 422
     assert any(error["loc"][-1] == "use_fixture_data" for error in res.json()["detail"])
+
+
+def test_catalogue_strategy_rejects_resource_exploding_position_count():
+    res = _validate(
+        "long_term",
+        {"model": "f_score", "tickers": [], "max_positions": 21},
+    )
+
+    assert res.status_code == 200
+    payload = res.json()["data"]
+    assert payload["valid"] is False
+    assert any(issue["field"] == "parameters.max_positions" for issue in payload["issues"])
+
+
+def test_account_contract_rejects_unbounded_sleeve_aggregation():
+    allocations = [{"strategy_id": index + 1, "weight": 1} for index in range(21)]
+
+    res = client.post(
+        "/api/v1/paper-trading/accounts",
+        json={"name": "Too Many Sleeves", "allocations": allocations},
+    )
+
+    assert res.status_code == 422
+    assert any(error["loc"][-1] == "allocations" for error in res.json()["detail"])

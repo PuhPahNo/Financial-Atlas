@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from ..core import market_hours
+from ..core.config import settings
 from ..db import init_db, session_scope
 from ..models.paper_trading import BacktestEquityPoint, BacktestRun, BacktestTrade, TradingStrategy
 from ..paper_trading import service
@@ -30,7 +32,10 @@ _KEEP_DAYS = 30
 
 
 def _window(years: int) -> tuple[date, date]:
-    end = date.today()
+    maximum_years = max(1, settings.backtest_max_window_days // 365)
+    if years < 1 or years > maximum_years:
+        raise ValueError(f"years must be between 1 and {maximum_years}")
+    end = market_hours.last_completed_trading_day()
     return end - timedelta(days=round(365.25 * years)), end
 
 
@@ -58,14 +63,17 @@ def run_one(strategy_id: int, *, years: int = 3) -> dict:
     init_db()
     strategy = service.get_strategy(strategy_id)["strategy"]
     start, end = _window(years)
-    service.run_backtest(BacktestRequest(
-        strategy_id=strategy_id,
-        start_date=start,
-        end_date=end,
-        starting_cash=100000.0,
-        benchmark="SPY",
-        persist_headline=True,
-    ))
+    service.run_backtest(
+        BacktestRequest(
+            strategy_id=strategy_id,
+            start_date=start,
+            end_date=end,
+            starting_cash=100000.0,
+            benchmark="SPY",
+            persist_headline=True,
+        ),
+        return_detail=False,
+    )
     log.info("headline refreshed: %s", strategy["name"])
     return {
         "strategy_id": strategy_id,
@@ -80,28 +88,43 @@ def prune_runs(*, keep_per_strategy: int = _KEEP_RUNS_PER_STRATEGY, keep_days: i
     Keeps the newest ``keep_per_strategy`` runs per strategy, plus anything from the
     last ``keep_days`` days regardless of count. Returns the number of runs deleted."""
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=keep_days)
-    doomed: list[int] = []
+    deleted = 0
     with session_scope() as s:
-        rows = s.query(BacktestRun.id, BacktestRun.strategy_id, BacktestRun.created_at) \
-                .order_by(BacktestRun.created_at.desc(), BacktestRun.id.desc()).all()
-        per_strategy: dict[int | None, int] = {}
-        for rid, sid, created in rows:
-            per_strategy[sid] = per_strategy.get(sid, 0) + 1
-            if per_strategy[sid] <= keep_per_strategy:
-                continue
-            if created is not None:
-                created_naive = created.replace(tzinfo=None) if created.tzinfo else created
-                if created_naive >= cutoff:
-                    continue
-            doomed.append(rid)
-        for i in range(0, len(doomed), 500):  # stay under SQLite's bind-variable cap
-            chunk = doomed[i:i + 500]
-            s.query(BacktestTrade).filter(BacktestTrade.run_id.in_(chunk)).delete(synchronize_session=False)
-            s.query(BacktestEquityPoint).filter(BacktestEquityPoint.run_id.in_(chunk)).delete(synchronize_session=False)
-            s.query(BacktestRun).filter(BacktestRun.id.in_(chunk)).delete(synchronize_session=False)
-    if doomed:
-        log.info("pruned %d old backtest runs", len(doomed))
-    return len(doomed)
+        strategy_ids = [sid for (sid,) in s.query(BacktestRun.strategy_id).distinct().all()]
+        for strategy_id in strategy_ids:
+            strategy_filter = (
+                BacktestRun.strategy_id.is_(None)
+                if strategy_id is None
+                else BacktestRun.strategy_id == strategy_id
+            )
+            keep_ids = [rid for (rid,) in (
+                s.query(BacktestRun.id)
+                .filter(strategy_filter)
+                .order_by(BacktestRun.created_at.desc(), BacktestRun.id.desc())
+                .limit(max(0, keep_per_strategy))
+                .all()
+            )]
+            while True:
+                query = (
+                    s.query(BacktestRun.id)
+                    .filter(strategy_filter)
+                    .filter(
+                        (BacktestRun.created_at < cutoff)
+                        | BacktestRun.created_at.is_(None)
+                    )
+                )
+                if keep_ids:
+                    query = query.filter(BacktestRun.id.notin_(keep_ids))
+                chunk = [rid for (rid,) in query.order_by(BacktestRun.id.asc()).limit(500).all()]
+                if not chunk:
+                    break
+                s.query(BacktestTrade).filter(BacktestTrade.run_id.in_(chunk)).delete(synchronize_session=False)
+                s.query(BacktestEquityPoint).filter(BacktestEquityPoint.run_id.in_(chunk)).delete(synchronize_session=False)
+                s.query(BacktestRun).filter(BacktestRun.id.in_(chunk)).delete(synchronize_session=False)
+                deleted += len(chunk)
+    if deleted:
+        log.info("pruned %d old backtest runs", deleted)
+    return deleted
 
 
 def prune() -> int:
@@ -132,4 +155,6 @@ def run(*, years: int = 3) -> dict:
 
 if __name__ == "__main__":
     logging.basicConfig(level="INFO")
-    print(run())
+    from .isolated_backtests import refresh_headlines
+
+    print(refresh_headlines())

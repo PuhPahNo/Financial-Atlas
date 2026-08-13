@@ -349,25 +349,36 @@ def _persist_backtest_result(
             )
             session.add(run)
         session.flush()
-        for trade in result["trades"]:
-            session.add(BacktestTrade(
-                run_id=run.id,
-                trade_date=trade["date"],
-                ticker=trade["ticker"],
-                side=trade["side"],
-                quantity=trade["quantity"],
-                price=trade["price"],
-                value=trade["value"],
-                reason=trade["reason"],
-            ))
-        for point in result["equity_curve"]:
-            session.add(BacktestEquityPoint(
-                run_id=run.id,
-                date=point["date"],
-                cash=point["cash"],
-                equity=point["equity"],
-                benchmark_equity=point["benchmark_equity"],
-            ))
+        # Batch mappings keep the ORM identity map from retaining a second Python
+        # object for every trade and daily point while the engine result is still
+        # alive. This matters for long, high-turnover simulations.
+        trades = result["trades"]
+        for offset in range(0, len(trades), 500):
+            session.bulk_insert_mappings(BacktestTrade, [
+                {
+                    "run_id": run.id,
+                    "trade_date": trade["date"],
+                    "ticker": trade["ticker"],
+                    "side": trade["side"],
+                    "quantity": trade["quantity"],
+                    "price": trade["price"],
+                    "value": trade["value"],
+                    "reason": trade["reason"],
+                }
+                for trade in trades[offset:offset + 500]
+            ])
+        points = result["equity_curve"]
+        for offset in range(0, len(points), 500):
+            session.bulk_insert_mappings(BacktestEquityPoint, [
+                {
+                    "run_id": run.id,
+                    "date": point["date"],
+                    "cash": point["cash"],
+                    "equity": point["equity"],
+                    "benchmark_equity": point["benchmark_equity"],
+                }
+                for point in points[offset:offset + 500]
+            ])
         session.flush()
         return run.id
 
@@ -394,6 +405,7 @@ def run_backtest(
     *,
     run_id: int | None = None,
     input_context: dict[str, Any] | None = None,
+    return_detail: bool = True,
 ) -> dict:
     ensure_seeded()
     tickers = normalize_tickers(payload.tickers)
@@ -429,6 +441,13 @@ def run_backtest(
 
     if payload.persist_headline and payload.strategy_id:
         _store_headline(payload.strategy_id, result, payload.start_date, payload.end_date)
+
+    if not return_detail:
+        return {
+            "run": {"id": run_id, "status": "completed"},
+            "served_by": result["served_by"],
+            "holdings": _json_dates(result["holdings"]),
+        }
 
     with session_scope() as session:
         run = session.get(BacktestRun, run_id)
@@ -525,7 +544,12 @@ def execute_queued_backtest(run_id: int) -> bool:
         input_context = {key: stored_inputs[key] for key in ("sweep",) if key in stored_inputs}
     try:
         payload = BacktestRequest(**request_data)
-        run_backtest(payload, run_id=run_id, input_context=input_context)
+        run_backtest(
+            payload,
+            run_id=run_id,
+            input_context=input_context,
+            return_detail=False,
+        )
         return True
     except Exception as exc:  # noqa: BLE001 — the job row is the error surface
         message = getattr(exc, "message", None) or str(exc) or "Backtest failed"

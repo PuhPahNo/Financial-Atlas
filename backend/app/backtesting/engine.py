@@ -373,6 +373,10 @@ def run_backtest(
 ) -> dict:
     if end_date <= start_date:
         raise ValidationError("Backtest end_date must be after start_date")
+    if (end_date - start_date).days > settings.backtest_max_window_days:
+        raise ValidationError(
+            f"Backtest window cannot exceed {settings.backtest_max_window_days} days"
+        )
 
     spec = parse_rules(strategy)
     tickers = tickers or strategy.get("parameters", {}).get("tickers", [])
@@ -387,6 +391,10 @@ def run_backtest(
     if spec is None and not use_fixture_data:
         params = strategy.get("parameters", {}) or {}
         model_t = {t.strip().upper().replace(".", "-") for t in tickers if t and t.strip()}
+        if len(model_t) > settings.backtest_max_tickers:
+            raise ValidationError(
+                f"Backtests cannot load more than {settings.backtest_max_tickers} tickers"
+            )
         # Fixed-basket models (ETF rotation, dual momentum, GTAA…) trade only the
         # tickers they declare; index models scan the point-in-time S&P 500 superset.
         if str(params.get("universe") or "").lower() in {"tickers", "fixed", "custom"} and model_t:
@@ -396,17 +404,29 @@ def run_backtest(
                 slippage_bps=slippage_bps, benchmark=benchmark, membership_on=None,
                 universe_kind="fixed",
             )
-        superset = sorted(set(univ.investable_superset()) | model_t)
+        # Only load names whose membership stint intersects this simulation window.
+        # The old all-time superset retained hundreds of impossible price histories
+        # and could exceed a 512 MB service on fundamental models such as Piotroski.
+        superset = sorted(set(univ.investable_between(start_date, end_date)) | model_t)
         cap = settings.backtest_universe_max
         if cap and cap > 0 and len(superset) > cap:  # safety backstop (0 = unlimited)
             superset = sorted(model_t | set(superset[:cap]))
+        if len(superset) > settings.backtest_max_tickers:
+            raise ValidationError(
+                "The historical universe for this window contains "
+                f"{len(superset)} tickers; the service limit is "
+                f"{settings.backtest_max_tickers}. Use a shorter window or fixed basket."
+            )
         membership = None
-        # Only claim point-in-time membership when the change-log is actually loadable —
-        # otherwise members_on() degrades to today's survivors, and running without the
-        # lambda makes the integrity report say so (warn) instead of lying (pass).
-        if settings.backtest_point_in_time_membership and univ.membership_available():
-            etfs = {s.upper() for s in univ.ETF_UNIVERSE}
-            membership = lambda d: univ.members_on(d) | etfs | model_t  # noqa: E731
+        # Capture only this window's stints and do not retain a full membership set
+        # for every historical date. A missing source remains an explicit integrity
+        # warning rather than silently presenting current survivors as point-in-time.
+        if settings.backtest_point_in_time_membership:
+            membership = univ.membership_between(
+                start_date,
+                end_date,
+                extra={s.upper() for s in univ.ETF_UNIVERSE} | model_t,
+            )
         return run_active_backtest(
             strategy=strategy, universe=superset, start_date=start_date, end_date=end_date,
             starting_cash=starting_cash, transaction_cost_bps=transaction_cost_bps,

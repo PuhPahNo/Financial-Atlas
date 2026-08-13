@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from ..core.config import DEFAULT_BACKTEST_MAX_POSITIONS, DEFAULT_BACKTEST_MAX_TICKERS
 from ..core.errors import ValidationError
 from .schemas import Category, normalize_tickers
 
@@ -125,6 +126,24 @@ def _validate_catalogue_config(
     issues: list[dict[str, str]],
 ) -> None:
     model = str(params.get("model") or "").strip().lower()
+    if len(set(tickers)) > DEFAULT_BACKTEST_MAX_TICKERS:
+        issues.append(_issue(
+            "parameters.tickers",
+            "too_many_items",
+            f"A strategy cannot contain more than {DEFAULT_BACKTEST_MAX_TICKERS} unique tickers.",
+        ))
+    if params.get("max_positions") is not None:
+        params["max_positions"] = _bounded_int(
+            value=params.get("max_positions"), fallback=None,
+            field="parameters.max_positions", label="Maximum positions",
+            issues=issues, minimum=1, maximum=DEFAULT_BACKTEST_MAX_POSITIONS,
+        )
+    if params.get("max_hold_days") is not None:
+        params["max_hold_days"] = _bounded_int(
+            value=params.get("max_hold_days"), fallback=None,
+            field="parameters.max_hold_days", label="Maximum holding period",
+            issues=issues, minimum=1, maximum=1095,
+        )
     if model:
         from ..backtesting.screen import MODELS  # late import — avoids module cycles
         if model not in MODELS:

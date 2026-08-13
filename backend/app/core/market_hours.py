@@ -27,6 +27,7 @@ _HOLIDAYS: frozenset[str] = frozenset({
 
 _OPEN_MINUTES = 9 * 60 + 30   # 09:30 ET
 _CLOSE_MINUTES = 16 * 60      # 16:00 ET
+_EOD_SETTLE_MINUTES = 15      # Yahoo's free EOD bar can trail the cash close.
 
 
 def _first_sunday(year: int, month: int) -> int:
@@ -66,6 +67,25 @@ def is_market_open(now_utc: datetime | None = None) -> bool:
 def last_trading_day(now_utc: datetime | None = None) -> date:
     """Most recent NYSE trading day on or before the current Eastern date."""
     d = _eastern(now_utc).date()
+    while d.weekday() >= 5 or d.isoformat() in _HOLIDAYS:
+        d -= timedelta(days=1)
+    return d
+
+
+def last_completed_trading_day(now_utc: datetime | None = None) -> date:
+    """Most recent NYSE session whose delayed EOD bar should be complete.
+
+    Before 16:15 ET on a trading day, today is not a completed price session yet.
+    Returning the prior session prevents pre-market maintenance and account-sleeve
+    backtests from repeatedly fetching a future/empty daily tail for every ticker.
+    """
+    et = _eastern(now_utc)
+    d = et.date()
+    is_session = d.weekday() < 5 and d.isoformat() not in _HOLIDAYS
+    minutes = et.hour * 60 + et.minute
+    if is_session and minutes >= _CLOSE_MINUTES + _EOD_SETTLE_MINUTES:
+        return d
+    d -= timedelta(days=1)
     while d.weekday() >= 5 or d.isoformat() in _HOLIDAYS:
         d -= timedelta(days=1)
     return d

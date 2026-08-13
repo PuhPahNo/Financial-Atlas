@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.db import CompanySnapshot, Watchlist, WatchlistItem, session_scope
-from app.jobs import refresh
+from app.jobs import isolated_data, refresh
 from app.main import app
 from app.services import screener
 from auth_helpers import authenticate
@@ -68,8 +68,11 @@ def test_refresh_job_uses_tracked_tickers_and_returns_details(monkeypatch):
 
 
 def test_screener_seed_endpoint_uses_default_universe(monkeypatch):
-    monkeypatch.setattr(screener, "DEFAULT_UNIVERSE", ["AAA", "BBB"])
-    monkeypatch.setattr(screener, "build_snapshot", lambda ticker: {"ticker": ticker})
+    monkeypatch.setattr(
+        isolated_data,
+        "seed_universe",
+        lambda tickers=None: {"attempted": 2, "ingested": ["AAA", "BBB"], "failed": []},
+    )
 
     res = client.post("/api/v1/screener/seed", json={})
 

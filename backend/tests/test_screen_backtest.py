@@ -29,9 +29,12 @@ def test_real_backtest_routes_through_active_screening_with_integrity_report(mon
     import app.backtesting.engine as eng
     series = {"AAA": _daily(hist0, end, lambda d: 100.0), "SPY": _daily(hist0, end, lambda d: 100.0)}
     monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
-    monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])   # avoid network fetches
-    monkeypatch.setattr(eng.univ, "members_on", lambda d: {"AAA"})
-    monkeypatch.setattr(eng.univ, "membership_available", lambda: True)  # change-log loadable
+    monkeypatch.setattr(eng.univ, "investable_between", lambda _start, _end: ["AAA"])   # avoid network fetches
+    monkeypatch.setattr(
+        eng.univ,
+        "membership_between",
+        lambda *_args, **_kwargs: lambda _date: {"AAA"},
+    )
 
     res = eng.run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
                            tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)
@@ -52,8 +55,8 @@ def test_membership_degrades_to_warn_when_changelog_unavailable(monkeypatch):
     import app.backtesting.engine as eng
     series = {"AAA": _daily(hist0, end, lambda d: 100.0), "SPY": _daily(hist0, end, lambda d: 100.0)}
     monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
-    monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])
-    monkeypatch.setattr(eng.univ, "membership_available", lambda: False)  # change-log outage
+    monkeypatch.setattr(eng.univ, "investable_between", lambda _start, _end: ["AAA"])
+    monkeypatch.setattr(eng.univ, "membership_between", lambda *_args, **_kwargs: None)
 
     res = eng.run_backtest(strategy={"category": "short_term", "name": "Z", "parameters": {"tickers": ["AAA"]}},
                            tickers=["AAA"], start_date=start, end_date=end, starting_cash=10000.0)
@@ -71,8 +74,12 @@ def test_index_models_need_no_tickers(monkeypatch):
     rise = lambda d: 50 + 50 * ((d - hist0).days / (end - hist0).days)
     series = {"AAA": _daily(hist0, end, rise), "SPY": _daily(hist0, end, lambda d: 100.0)}
     monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
-    monkeypatch.setattr(eng.univ, "investable_superset", lambda: ["AAA"])
-    monkeypatch.setattr(eng.univ, "members_on", lambda d: {"AAA"})
+    monkeypatch.setattr(eng.univ, "investable_between", lambda _start, _end: ["AAA"])
+    monkeypatch.setattr(
+        eng.univ,
+        "membership_between",
+        lambda *_args, **_kwargs: lambda _date: {"AAA"},
+    )
 
     res = eng.run_backtest(
         strategy={"category": "short_term", "name": "Mom", "parameters": {"model": "momentum_12_1", "tickers": []}},
@@ -89,7 +96,7 @@ def test_fixed_basket_models_trade_only_their_tickers(monkeypatch):
     rise = lambda d: 50 + 50 * ((d - hist0).days / (end - hist0).days)
     series = {"SPY": _daily(hist0, end, rise), "AGG": _daily(hist0, end, lambda d: 100.0)}
     monkeypatch.setattr(s.price_store, "get_series", _stub_prices(series))
-    monkeypatch.setattr(eng.univ, "investable_superset", lambda: (_ for _ in ()).throw(AssertionError("superset must not be scanned")))
+    monkeypatch.setattr(eng.univ, "investable_between", lambda *_args: (_ for _ in ()).throw(AssertionError("superset must not be scanned")))
 
     res = eng.run_backtest(
         strategy={"category": "risk_rotation", "name": "GEM",

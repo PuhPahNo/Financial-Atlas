@@ -9,7 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from app import main
-from app.core.errors import ProviderError
+from app.backtesting import engine
+from app.core.config import settings
+from app.core.errors import ProviderError, ValidationError
 from app.jobs import isolated_backtests
 from app.paper_trading import service
 from app.paper_trading.schemas import BacktestRequest, ParameterSweepRequest, StrategyCreate
@@ -210,3 +212,44 @@ def test_real_child_reads_shared_job_and_persists_failure():
     failed = service.get_backtest(run_id)["run"]
     assert failed["status"] == "failed"
     assert "end_date must be after start_date" in failed["warnings"][0]
+
+
+def test_engine_rejects_unbounded_history_before_loading_data(monkeypatch):
+    monkeypatch.setattr(settings, "backtest_max_window_days", 10)
+    monkeypatch.setattr(
+        engine.price_store,
+        "get_series",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must fail before data load")),
+    )
+
+    with pytest.raises(ValidationError, match="cannot exceed 10 days"):
+        engine.run_backtest(
+            strategy={"category": "short_term", "name": "Bounded", "parameters": {}},
+            tickers=["SPY"],
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 12),
+            starting_cash=1000,
+        )
+
+
+def test_engine_rejects_oversized_historical_universe_before_loading_prices(monkeypatch):
+    monkeypatch.setattr(settings, "backtest_max_tickers", 2)
+    monkeypatch.setattr(
+        engine.univ,
+        "investable_between",
+        lambda *_args: ["AAA", "BBB", "CCC"],
+    )
+    monkeypatch.setattr(
+        engine.price_store,
+        "get_series",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must fail before data load")),
+    )
+
+    with pytest.raises(ValidationError, match="contains 3 tickers; the service limit is 2"):
+        engine.run_backtest(
+            strategy={"category": "short_term", "name": "Bounded", "parameters": {}},
+            tickers=[],
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 2, 1),
+            starting_cash=1000,
+        )
